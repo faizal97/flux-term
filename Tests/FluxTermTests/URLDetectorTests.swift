@@ -70,9 +70,21 @@ final class URLDetectorTests: XCTestCase {
 
         let detected = URLDetector.detectURLs(in: terminal)
         XCTAssertFalse(detected.isEmpty, "Expected URLs on visible scrolled rows")
+        XCTAssertEqual(detected.count, terminal.rows, "Expected one URL per visible row")
         XCTAssertTrue(
             detected.allSatisfy { $0.row >= scrolledTop && $0.row < scrolledTop + terminal.rows },
             "Detected URL rows should be scroll-invariant buffer rows within the visible window"
         )
+
+        let expectedRows = Array(scrolledTop..<(scrolledTop + terminal.rows))
+        XCTAssertEqual(detected.map(\.row), expectedRows, "Detected rows should exactly match the visible scrollback window")
+
+        for row in expectedRows {
+            guard let match = detected.first(where: { $0.row == row }) else {
+                XCTFail("Missing detected URL for row \(row)")
+                return
+            }
+            XCTAssertEqual(match.url.absoluteString, "https://example\(row).com")
+        }
     }
 }
