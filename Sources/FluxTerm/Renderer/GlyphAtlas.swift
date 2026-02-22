@@ -34,6 +34,7 @@ final class GlyphAtlas {
     private(set) var texture: MTLTexture!
 
     private var atlasWidth: Int = 1024
+    private let initialAtlasHeight: Int = 1024
     private var atlasHeight: Int = 1024
     private var cursorX: Int = 0
     private var cursorY: Int = 0
@@ -185,6 +186,7 @@ final class GlyphAtlas {
         cursorX = 0
         cursorY = 0
         rowHeight = 0
+        atlasHeight = initialAtlasHeight
         texture = createTexture(width: atlasWidth, height: atlasHeight)
     }
 }

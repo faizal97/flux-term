@@ -22,6 +22,7 @@ final class MetalRenderer {
     private var frameSemaphore: DispatchSemaphore
     private var frameIndex = 0
     private var instanceBuffers: [MTLBuffer] = []
+    private var pendingGlyphAtlasClear = false
 
     private(set) var cellWidth: Float = 0
     private(set) var cellHeight: Float = 0
@@ -47,6 +48,10 @@ final class MetalRenderer {
         cellWidth = Float(cell.width)
         cellHeight = Float(cell.height)
         fontAscent = Float(CTFontGetAscent(cachedFont))
+    }
+
+    func requestGlyphAtlasClear() {
+        pendingGlyphAtlasClear = true
     }
 
     private func buildPipelines() {
@@ -190,6 +195,10 @@ final class MetalRenderer {
         cursorDisplayPos: SIMD2<Float> = .zero
     ) {
         frameSemaphore.wait()
+        if pendingGlyphAtlasClear {
+            glyphAtlas.clearCache()
+            pendingGlyphAtlasClear = false
+        }
 
         let instanceBuffer = instanceBuffers[frameIndex % inflightCount]
         let cellCount = buildInstances(
