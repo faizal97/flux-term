@@ -6,6 +6,8 @@ import QuartzCore
 import SwiftTerm
 
 final class MetalRenderer {
+    private static let ansiColorCubeTable: [Float] = [0, 95, 135, 175, 215, 255]
+
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
     let glyphAtlas: GlyphAtlas
@@ -17,6 +19,7 @@ final class MetalRenderer {
     private var cursorBloomPipeline: MTLRenderPipelineState!
     private var sampler: MTLSamplerState!
     private var cachedFont: CTFont
+    private var glyphCache: [Character: CGGlyph] = [:]
 
     private let inflightCount = 3
     private var frameSemaphore: DispatchSemaphore
@@ -48,6 +51,7 @@ final class MetalRenderer {
         cellWidth = Float(cell.width)
         cellHeight = Float(cell.height)
         fontAscent = Float(CTFontGetAscent(cachedFont))
+        glyphCache.removeAll(keepingCapacity: true)
     }
 
     func requestGlyphAtlasClear() {
@@ -344,7 +348,7 @@ final class MetalRenderer {
                 }
 
                 let char = terminal.getCharacter(for: cell)
-                if char != " " && char != "\0" && !String(char).unicodeScalars.isEmpty {
+                if char != " " && char != "\0" && !char.unicodeScalars.isEmpty {
                     let glyphID = getGlyph(for: char, font: font)
                     if glyphID != 0 {
                         let glyph = glyphAtlas.lookup(
@@ -375,11 +379,36 @@ final class MetalRenderer {
     }
 
     private func getGlyph(for char: Character, font: CTFont) -> CGGlyph {
-        var chars = Array(String(char).utf16)
-        guard !chars.isEmpty else { return 0 }
-        var glyphs = Array(repeating: CGGlyph(0), count: chars.count)
-        CTFontGetGlyphsForCharacters(font, &chars, &glyphs, chars.count)
-        return glyphs.first(where: { $0 != 0 }) ?? 0
+        if let cached = glyphCache[char] {
+            return cached
+        }
+
+        let utf16Units = String(char).utf16
+        let count = utf16Units.count
+        guard count > 0 else {
+            glyphCache[char] = 0
+            return 0
+        }
+
+        var resolvedGlyph: CGGlyph = 0
+        withUnsafeTemporaryAllocation(of: UniChar.self, capacity: count) { chars in
+            withUnsafeTemporaryAllocation(of: CGGlyph.self, capacity: count) { glyphs in
+                var index = 0
+                for unit in utf16Units {
+                    chars[index] = unit
+                    glyphs[index] = 0
+                    index += 1
+                }
+                CTFontGetGlyphsForCharacters(font, chars.baseAddress!, glyphs.baseAddress!, count)
+                for idx in 0..<count where glyphs[idx] != 0 {
+                    resolvedGlyph = glyphs[idx]
+                    break
+                }
+            }
+        }
+
+        glyphCache[char] = resolvedGlyph
+        return resolvedGlyph
     }
 
     private func resolveColor(_ color: Attribute.Color, defaultColor: SIMD4<Float>, isBackground: Bool) -> SIMD4<Float> {
@@ -405,7 +434,7 @@ final class MetalRenderer {
             let r = idx / 36
             let g = (idx / 6) % 6
             let b = idx % 6
-            let table: [Float] = [0, 95, 135, 175, 215, 255]
+            let table = Self.ansiColorCubeTable
             return SIMD4(table[r] / 255.0, table[g] / 255.0, table[b] / 255.0, 1.0)
         }
 
