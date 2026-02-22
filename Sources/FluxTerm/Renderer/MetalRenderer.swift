@@ -6,6 +6,29 @@ import QuartzCore
 import SwiftTerm
 
 final class MetalRenderer {
+    enum InitializationError: LocalizedError {
+        case metalLibraryUnavailable(details: [String])
+        case missingShaderFunction(name: String)
+        case pipelineCreationFailed(name: String, underlying: Error)
+        case instanceBufferAllocationFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .metalLibraryUnavailable(let details):
+                if details.isEmpty {
+                    return "Failed to load the Metal shader library."
+                }
+                return "Failed to load the Metal shader library: \(details.joined(separator: " | "))"
+            case .missingShaderFunction(let name):
+                return "Missing Metal shader function '\(name)'."
+            case .pipelineCreationFailed(let name, let underlying):
+                return "Failed to create Metal render pipeline '\(name)': \(underlying.localizedDescription)"
+            case .instanceBufferAllocationFailed:
+                return "Failed to allocate renderer instance buffers."
+            }
+        }
+    }
+
     private static let ansiColorCubeTable: [Float] = [0, 95, 135, 175, 215, 255]
 
     let device: MTLDevice
@@ -31,7 +54,7 @@ final class MetalRenderer {
     private(set) var cellHeight: Float = 0
     private(set) var fontAscent: Float = 0
 
-    init(device: MTLDevice, commandQueue: MTLCommandQueue, config: TerminalConfig) {
+    init(device: MTLDevice, commandQueue: MTLCommandQueue, config: TerminalConfig) throws {
         self.device = device
         self.commandQueue = commandQueue
         self.config = config
@@ -40,9 +63,9 @@ final class MetalRenderer {
         self.cachedFont = config.font
 
         updateFontMetrics()
-        buildPipelines()
+        try buildPipelines()
         buildSampler()
-        allocateBuffers()
+        try allocateBuffers()
     }
 
     func updateFontMetrics() {
@@ -58,12 +81,12 @@ final class MetalRenderer {
         pendingGlyphAtlasClear = true
     }
 
-    private func buildPipelines() {
-        let library = loadMetalLibrary()
+    private func buildPipelines() throws {
+        let library = try loadMetalLibrary()
 
         let bgDesc = MTLRenderPipelineDescriptor()
-        bgDesc.vertexFunction = library.makeFunction(name: "bg_vertex")
-        bgDesc.fragmentFunction = library.makeFunction(name: "bg_fragment")
+        bgDesc.vertexFunction = try loadFunction(named: "bg_vertex", from: library)
+        bgDesc.fragmentFunction = try loadFunction(named: "bg_fragment", from: library)
         let bgColorAttachment = bgDesc.colorAttachments[0]!
         bgColorAttachment.pixelFormat = .bgra8Unorm
         bgColorAttachment.isBlendingEnabled = true
@@ -73,11 +96,11 @@ final class MetalRenderer {
         bgColorAttachment.sourceAlphaBlendFactor = .sourceAlpha
         bgColorAttachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         bgColorAttachment.alphaBlendOperation = .add
-        bgPipeline = try! device.makeRenderPipelineState(descriptor: bgDesc)
+        bgPipeline = try makePipelineState(named: "background", descriptor: bgDesc)
 
         let glyphDesc = MTLRenderPipelineDescriptor()
-        glyphDesc.vertexFunction = library.makeFunction(name: "glyph_vertex")
-        glyphDesc.fragmentFunction = library.makeFunction(name: "glyph_fragment")
+        glyphDesc.vertexFunction = try loadFunction(named: "glyph_vertex", from: library)
+        glyphDesc.fragmentFunction = try loadFunction(named: "glyph_fragment", from: library)
         let glyphColorAttachment = glyphDesc.colorAttachments[0]!
         glyphColorAttachment.pixelFormat = .bgra8Unorm
         glyphColorAttachment.isBlendingEnabled = true
@@ -87,11 +110,11 @@ final class MetalRenderer {
         glyphColorAttachment.sourceAlphaBlendFactor = .one
         glyphColorAttachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         glyphColorAttachment.alphaBlendOperation = .add
-        glyphPipeline = try! device.makeRenderPipelineState(descriptor: glyphDesc)
+        glyphPipeline = try makePipelineState(named: "glyph", descriptor: glyphDesc)
 
         let cursorDesc = MTLRenderPipelineDescriptor()
-        cursorDesc.vertexFunction = library.makeFunction(name: "cursor_vertex")
-        cursorDesc.fragmentFunction = library.makeFunction(name: "cursor_fragment")
+        cursorDesc.vertexFunction = try loadFunction(named: "cursor_vertex", from: library)
+        cursorDesc.fragmentFunction = try loadFunction(named: "cursor_fragment", from: library)
         let cursorColorAttachment = cursorDesc.colorAttachments[0]!
         cursorColorAttachment.pixelFormat = .bgra8Unorm
         cursorColorAttachment.isBlendingEnabled = true
@@ -101,11 +124,11 @@ final class MetalRenderer {
         cursorColorAttachment.sourceAlphaBlendFactor = .one
         cursorColorAttachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         cursorColorAttachment.alphaBlendOperation = .add
-        cursorPipeline = try! device.makeRenderPipelineState(descriptor: cursorDesc)
+        cursorPipeline = try makePipelineState(named: "cursor", descriptor: cursorDesc)
 
         let bloomDesc = MTLRenderPipelineDescriptor()
-        bloomDesc.vertexFunction = library.makeFunction(name: "cursor_bloom_vertex")
-        bloomDesc.fragmentFunction = library.makeFunction(name: "cursor_bloom_fragment")
+        bloomDesc.vertexFunction = try loadFunction(named: "cursor_bloom_vertex", from: library)
+        bloomDesc.fragmentFunction = try loadFunction(named: "cursor_bloom_fragment", from: library)
         let bloomColorAttachment = bloomDesc.colorAttachments[0]!
         bloomColorAttachment.pixelFormat = .bgra8Unorm
         bloomColorAttachment.isBlendingEnabled = true
@@ -115,22 +138,49 @@ final class MetalRenderer {
         bloomColorAttachment.sourceAlphaBlendFactor = .one
         bloomColorAttachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         bloomColorAttachment.alphaBlendOperation = .add
-        cursorBloomPipeline = try! device.makeRenderPipelineState(descriptor: bloomDesc)
+        cursorBloomPipeline = try makePipelineState(named: "cursor bloom", descriptor: bloomDesc)
     }
 
-    private func loadMetalLibrary() -> MTLLibrary {
-        if let lib = try? device.makeDefaultLibrary(bundle: .module) {
-            return lib
+    private func loadFunction(named name: String, from library: MTLLibrary) throws -> MTLFunction {
+        guard let function = library.makeFunction(name: name) else {
+            throw InitializationError.missingShaderFunction(name: name)
         }
+        return function
+    }
+
+    private func makePipelineState(named name: String, descriptor: MTLRenderPipelineDescriptor) throws -> MTLRenderPipelineState {
+        do {
+            return try device.makeRenderPipelineState(descriptor: descriptor)
+        } catch {
+            throw InitializationError.pipelineCreationFailed(name: name, underlying: error)
+        }
+    }
+
+    private func loadMetalLibrary() throws -> MTLLibrary {
+        var errors: [String] = []
+
+        do {
+            return try device.makeDefaultLibrary(bundle: .module)
+        } catch {
+            errors.append("module default library: \(error.localizedDescription)")
+        }
+
         if let lib = device.makeDefaultLibrary() {
             return lib
         }
-        if let source = loadShaderSource(),
-           let lib = try? device.makeLibrary(source: source, options: nil) {
-            return lib
+        errors.append("system default library unavailable")
+
+        if let source = loadShaderSource() {
+            do {
+                return try device.makeLibrary(source: source, options: nil)
+            } catch {
+                errors.append("source compilation failed: \(error.localizedDescription)")
+            }
+        } else {
+            errors.append("shader source fallback unavailable")
         }
 
-        fatalError("Failed to load Metal library: default library missing and source fallback unavailable")
+        throw InitializationError.metalLibraryUnavailable(details: errors)
     }
 
     private func loadShaderSource() -> String? {
@@ -174,7 +224,7 @@ final class MetalRenderer {
         sampler = device.makeSamplerState(descriptor: desc)
     }
 
-    private func allocateBuffers() {
+    private func allocateBuffers() throws {
         let maxCells = 360 * 180
         let size = MemoryLayout<CellInstance>.stride * maxCells
         for _ in 0..<inflightCount {
@@ -183,7 +233,7 @@ final class MetalRenderer {
             }
         }
         if instanceBuffers.isEmpty {
-            fatalError("Failed to allocate renderer instance buffers")
+            throw InitializationError.instanceBufferAllocationFailed
         }
     }
 

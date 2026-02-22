@@ -45,11 +45,11 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         config: TerminalConfig = TerminalConfig(),
         session: TerminalSession = TerminalSession(),
         metalView: TerminalMetalView = TerminalMetalView(frame: .zero)
-    ) {
+    ) throws {
         self.config = config
         self.session = session
         self.metalView = metalView
-        renderer = MetalRenderer(
+        renderer = try MetalRenderer(
             device: metalView.device,
             commandQueue: metalView.commandQueue,
             config: config

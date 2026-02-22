@@ -11,7 +11,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setAppIcon()
-        mainWindow = MainWindow()
+        do {
+            mainWindow = try MainWindow.make()
+        } catch {
+            presentStartupError(error)
+            NSApp.terminate(nil)
+            return
+        }
         mainWindow?.terminalVC.loadViewIfNeeded()
         setupMenuBar()
         wireMenuTargets()
@@ -27,6 +33,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    private func presentStartupError(_ error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "FluxTerm couldn't start"
+        alert.informativeText = """
+        Failed to initialize the Metal renderer.
+
+        \(error.localizedDescription)
+        """
+        alert.addButton(withTitle: "Quit")
+        alert.runModal()
     }
 
     private func setupMenuBar() {

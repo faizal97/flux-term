@@ -3,7 +3,7 @@ import XCTest
 
 final class TerminalViewControllerSelectionTests: XCTestCase {
     private func makeController(cols: Int = 120, rows: Int = 3) -> TerminalViewController {
-        let controller = TerminalViewController()
+        let controller = try! TerminalViewController()
         controller.session = TerminalSession(cols: cols, rows: rows)
         return controller
     }

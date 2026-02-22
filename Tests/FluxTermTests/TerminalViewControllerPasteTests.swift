@@ -4,7 +4,7 @@ import SwiftTerm
 
 final class TerminalViewControllerPasteTests: XCTestCase {
     private func makeController(cols: Int = 80, rows: Int = 24) -> TerminalViewController {
-        let controller = TerminalViewController()
+        let controller = try! TerminalViewController()
         controller.session = TerminalSession(cols: cols, rows: rows)
         return controller
     }
