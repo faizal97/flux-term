@@ -53,89 +53,63 @@ final class KeyEncoderNSEventTests: XCTestCase {
         bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
     }
 
-    // MARK: - Dead-Key / IME Scenarios (Option+Letter)
+    // MARK: - Option+Letter (Layout-Independent)
     //
-    // On macOS with US keyboard, Option+letter produces a "dead-key" or
-    // special character in `characters`, while `charactersIgnoringModifiers`
-    // returns the raw letter. Terminals must use the raw letter with ESC prefix.
+    // The encoder must use `charactersIgnoringModifiers` (the raw letter),
+    // never `characters` (which varies by keyboard layout / IME).
+    // These tests use arbitrary `characters` values to prove layout independence.
 
-    func testOptionB_DeadKey() throws {
-        // Option+B: characters="∫" (integral), charsIM="b"
-        let event = try makeKeyEvent(
-            keyCode: 11,
-            modifiers: .option,
-            characters: "∫",
-            charactersIgnoringModifiers: "b"
-        )
-        XCTAssertEqual(event.characters, "∫", "Real event should preserve dead-key character")
-        XCTAssertEqual(event.charactersIgnoringModifiers, "b", "Real event should preserve raw letter")
-        XCTAssertEqual(encodeEvent(event), [0x1B, 0x62], "Should produce \\eb, not UTF-8 of ∫")
+    func testOptionLetter_UsesCharsIgnoringModifiers() throws {
+        // Each entry: (keyCode, raw letter, arbitrary layout-specific characters value)
+        let cases: [(UInt16, String, String)] = [
+            (11, "b", "∫"),     // US: integral
+            (11, "b", "ß"),     // German: sharp s
+            (11, "b", "∏"),     // hypothetical layout
+            (3,  "f", "ƒ"),     // US: function symbol
+            (3,  "f", "·"),     // hypothetical layout
+            (2,  "d", "∂"),     // US: partial derivative
+            (14, "e", "´"),     // US: acute accent dead key
+            (32, "u", "¨"),     // US: umlaut dead key
+            (34, "i", "ˆ"),     // US: circumflex dead key
+            (45, "n", "˜"),     // US: tilde dead key
+        ]
+
+        for (keyCode, rawLetter, layoutChars) in cases {
+            let event = try makeKeyEvent(
+                keyCode: keyCode,
+                modifiers: .option,
+                characters: layoutChars,
+                charactersIgnoringModifiers: rawLetter
+            )
+            let expected: [UInt8] = [0x1B, UInt8(rawLetter.unicodeScalars.first!.value)]
+            XCTAssertEqual(
+                encodeEvent(event), expected,
+                "Option+\(rawLetter) with characters=\"\(layoutChars)\" should produce \\e\(rawLetter)"
+            )
+        }
     }
 
-    func testOptionF_DeadKey() throws {
-        // Option+F: characters="ƒ" (function symbol), charsIM="f"
-        let event = try makeKeyEvent(
-            keyCode: 3,
-            modifiers: .option,
-            characters: "ƒ",
-            charactersIgnoringModifiers: "f"
-        )
-        XCTAssertEqual(encodeEvent(event), [0x1B, 0x66], "Should produce \\ef")
-    }
+    func testOptionLetter_OutputUnchangedByDifferentCharacters() throws {
+        // Same raw letter "b" with three different characters values
+        // must all produce identical output: \eb
+        let variants = ["∫", "ß", "β", "♭"]
+        var results: [[UInt8]] = []
 
-    func testOptionD_DeadKey() throws {
-        // Option+D: characters="∂" (partial derivative), charsIM="d"
-        let event = try makeKeyEvent(
-            keyCode: 2,
-            modifiers: .option,
-            characters: "∂",
-            charactersIgnoringModifiers: "d"
-        )
-        XCTAssertEqual(encodeEvent(event), [0x1B, 0x64], "Should produce \\ed")
-    }
+        for chars in variants {
+            let event = try makeKeyEvent(
+                keyCode: 11,
+                modifiers: .option,
+                characters: chars,
+                charactersIgnoringModifiers: "b"
+            )
+            results.append(encodeEvent(event))
+        }
 
-    func testOptionE_AccentDeadKey() throws {
-        // Option+E: characters="´" (acute accent dead key), charsIM="e"
-        let event = try makeKeyEvent(
-            keyCode: 14,
-            modifiers: .option,
-            characters: "´",
-            charactersIgnoringModifiers: "e"
-        )
-        XCTAssertEqual(encodeEvent(event), [0x1B, 0x65], "Should produce \\ee, not the accent")
-    }
-
-    func testOptionU_UmlautDeadKey() throws {
-        // Option+U: characters="¨" (umlaut dead key), charsIM="u"
-        let event = try makeKeyEvent(
-            keyCode: 32,
-            modifiers: .option,
-            characters: "¨",
-            charactersIgnoringModifiers: "u"
-        )
-        XCTAssertEqual(encodeEvent(event), [0x1B, 0x75], "Should produce \\eu, not the umlaut")
-    }
-
-    func testOptionI_CircumflexDeadKey() throws {
-        // Option+I: characters="ˆ" (circumflex dead key), charsIM="i"
-        let event = try makeKeyEvent(
-            keyCode: 34,
-            modifiers: .option,
-            characters: "ˆ",
-            charactersIgnoringModifiers: "i"
-        )
-        XCTAssertEqual(encodeEvent(event), [0x1B, 0x69], "Should produce \\ei")
-    }
-
-    func testOptionN_TildeDeadKey() throws {
-        // Option+N: characters="˜" (tilde dead key), charsIM="n"
-        let event = try makeKeyEvent(
-            keyCode: 45,
-            modifiers: .option,
-            characters: "˜",
-            charactersIgnoringModifiers: "n"
-        )
-        XCTAssertEqual(encodeEvent(event), [0x1B, 0x6E], "Should produce \\en")
+        let expected: [UInt8] = [0x1B, 0x62]
+        for (i, result) in results.enumerated() {
+            XCTAssertEqual(result, expected,
+                "Option+b with characters=\"\(variants[i])\" should still produce \\eb")
+        }
     }
 
     // MARK: - Arrow Keys with Device Flags
@@ -338,18 +312,19 @@ final class KeyInputPipelineTests: XCTestCase {
         bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
     }
 
-    // MARK: - Pipeline: Option+Letter (dead-key through full pipeline)
+    // MARK: - Pipeline: Option+Letter (layout-independent through full pipeline)
 
-    func testPipeline_OptionB_DeadKey() throws {
+    func testPipeline_OptionB_IgnoresLayoutCharacters() throws {
+        // Use a non-US characters value to prove the pipeline doesn't depend on layout
         let event = try makeKeyEvent(
             keyCode: 11,
             modifiers: .option,
-            characters: "∫",
+            characters: "ß",
             charactersIgnoringModifiers: "b"
         )
         controller.handleKeyDown(event)
         XCTAssertEqual(capturedBytes.count, 1)
-        XCTAssertEqual(capturedBytes[0], [0x1B, 0x62], "Pipeline: Option+B → \\eb")
+        XCTAssertEqual(capturedBytes[0], [0x1B, 0x62], "Pipeline: Option+B → \\eb regardless of layout")
     }
 
     // MARK: - Pipeline: Modifier+Arrow
