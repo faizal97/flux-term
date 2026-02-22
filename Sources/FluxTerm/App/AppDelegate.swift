@@ -10,11 +10,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private weak var decreaseFontItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setAppIcon()
         mainWindow = MainWindow()
         setupMenuBar()
         wireMenuTargets()
         mainWindow?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func setAppIcon() {
+        guard let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return }
+        NSApp.applicationIconImage = image
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

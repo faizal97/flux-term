@@ -11,7 +11,10 @@ let package = Package(
         .executableTarget(
             name: "FluxTerm",
             dependencies: ["SwiftTerm"],
-            resources: [.process("Renderer/Shaders.metal")]
+            resources: [
+                .process("Renderer/Shaders.metal"),
+                .process("Resources/AppIcon.png")
+            ]
         ),
         .testTarget(
             name: "FluxTermTests",
