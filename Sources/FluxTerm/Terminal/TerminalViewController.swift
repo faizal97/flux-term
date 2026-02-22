@@ -467,7 +467,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     private func applyFontChange() {
         renderer.config = config
         renderer.updateFontMetrics()
-        renderer.glyphAtlas.clearCache()
+        renderer.requestGlyphAtlasClear()
         scrollBottomYDisp = session.terminal.getTopVisibleRow()
         resizeTerminalIfNeeded()
         metalView?.setNeedsRedraw()
