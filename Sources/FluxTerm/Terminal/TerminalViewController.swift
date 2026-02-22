@@ -9,10 +9,10 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         var row: Int
     }
 
-    var metalView: TerminalMetalView!
-    var renderer: MetalRenderer!
-    var session: TerminalSession!
-    var config = TerminalConfig()
+    var metalView: TerminalMetalView
+    var renderer: MetalRenderer
+    var session: TerminalSession
+    var config: TerminalConfig
     // Visible for testing: lets KeyInputPipelineTests intercept handleKeyDown bytes.
     var inputInterceptor: (([UInt8]) -> Void)?
 
@@ -41,24 +41,43 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     private var hoveredURL: DetectedURL?
     private var urlRefreshWorkItem: DispatchWorkItem?
 
+    init(
+        config: TerminalConfig = TerminalConfig(),
+        session: TerminalSession = TerminalSession(),
+        metalView: TerminalMetalView = TerminalMetalView(frame: .zero)
+    ) {
+        self.config = config
+        self.session = session
+        self.metalView = metalView
+        renderer = MetalRenderer(
+            device: metalView.device,
+            commandQueue: metalView.commandQueue,
+            config: config
+        )
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 960, height: 640))
         view = root
 
-        metalView = TerminalMetalView(frame: root.bounds)
+        metalView.frame = root.bounds
         metalView.autoresizingMask = [.width, .height]
+        metalView.controller = self
         root.addSubview(metalView)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        renderer = MetalRenderer(device: metalView.device, commandQueue: metalView.commandQueue, config: config)
-
         let grid = renderer.gridSize(for: view.bounds.size)
         lastGrid = grid
 
-        session = TerminalSession(cols: grid.cols, rows: grid.rows)
+        session.resize(cols: grid.cols, rows: grid.rows)
         session.delegate = self
         session.start()
         let (cursorX, cursorY) = session.terminal.getCursorLocation()
@@ -73,7 +92,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
 
         setupDisplayLink()
         setupCursorTimer()
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     override func viewDidAppear() {
@@ -87,7 +106,6 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     }
 
     private func resizeTerminalIfNeeded() {
-        guard renderer != nil, session != nil else { return }
         let grid = renderer.gridSize(for: view.bounds.size)
         if lastGrid?.cols == grid.cols && lastGrid?.rows == grid.rows {
             return
@@ -96,7 +114,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         session.resize(cols: grid.cols, rows: grid.rows)
         scrollBottomYDisp = session.terminal.getTopVisibleRow()
         refreshURLs()
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     private func setupDisplayLink() {
@@ -123,7 +141,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
             if elapsed < self.cursorIdleDelay {
                 if self.cursorBlinkPhase != 0.0 {
                     self.cursorBlinkPhase = 0.0
-                    self.metalView?.setNeedsRedraw()
+                    self.metalView.setNeedsRedraw()
                 }
             } else {
                 let blinkElapsed = elapsed - self.cursorIdleDelay
@@ -131,7 +149,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
                 let newPhase = Float(cyclePosition) * 2.0 * .pi
                 if newPhase != self.cursorBlinkPhase {
                     self.cursorBlinkPhase = newPhase
-                    self.metalView?.setNeedsRedraw()
+                    self.metalView.setNeedsRedraw()
                 }
             }
         }
@@ -158,7 +176,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         // Keep redrawing while cursor is animating.
         let animating = CACurrentMediaTime() - cursorAnimationStartTime < cursorAnimationDuration
         if animating {
-            metalView?.setNeedsRedraw()
+            metalView.setNeedsRedraw()
         }
 
         let cursorOpacity = 0.5 + 0.5 * cos(cursorBlinkPhase)
@@ -201,7 +219,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         if selectionStart != nil || selectionEnd != nil {
             selectionStart = nil
             selectionEnd = nil
-            metalView?.setNeedsRedraw()
+            metalView.setNeedsRedraw()
         }
         let bytes = encodeKey(event)
         if !bytes.isEmpty {
@@ -219,7 +237,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         if selectionStart != nil || selectionEnd != nil {
             selectionStart = nil
             selectionEnd = nil
-            metalView?.setNeedsRedraw()
+            metalView.setNeedsRedraw()
         }
         resetCursorBlinkCycle()
         session.sendInput(text)
@@ -251,7 +269,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         if proposed != current {
             session.terminal.buffer.yDisp = proposed
             refreshURLs()
-            metalView?.setNeedsRedraw()
+            metalView.setNeedsRedraw()
         }
     }
 
@@ -267,17 +285,17 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         let pos = cellPosition(from: event)
         selectionStart = pos
         selectionEnd = pos
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     func handleMouseDragged(_ event: NSEvent) {
         selectionEnd = cellPosition(from: event)
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     func handleMouseUp(_ event: NSEvent) {
         selectionEnd = cellPosition(from: event)
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     func handleMouseMoved(_ event: NSEvent) {
@@ -289,7 +307,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         } else {
             NSCursor.iBeam.set()
         }
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     private func cellPosition(from event: NSEvent) -> CellPosition {
@@ -378,7 +396,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         urlRefreshWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             self?.refreshURLs()
-            self?.metalView?.setNeedsRedraw()
+            self?.metalView.setNeedsRedraw()
         }
         urlRefreshWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
@@ -388,7 +406,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         scrollBottomYDisp = session.terminal.getTopVisibleRow()
         session.terminal.buffer.yDisp = scrollBottomYDisp
         scheduleURLRefresh()
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     func terminalSession(_ session: TerminalSession, didScrollTo yDisp: Int) {
@@ -399,7 +417,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         scrollBottomYDisp = session.terminal.getTopVisibleRow()
         session.terminal.buffer.yDisp = scrollBottomYDisp
         refreshURLs()
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     func terminalSession(_ session: TerminalSession, titleDidChange title: String) {
@@ -420,7 +438,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         NSPasteboard.general.setString(text, forType: .string)
         selectionStart = nil
         selectionEnd = nil
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     @objc func paste(_ sender: Any?) {
@@ -451,7 +469,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         let topVisibleRow = session.terminal.getTopVisibleRow()
         selectionStart = CellPosition(col: 0, row: topVisibleRow)
         selectionEnd = CellPosition(col: session.terminal.cols - 1, row: topVisibleRow + session.terminal.rows - 1)
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     @objc func increaseFontSize(_ sender: Any?) {
@@ -470,13 +488,13 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         renderer.requestGlyphAtlasClear()
         scrollBottomYDisp = session.terminal.getTopVisibleRow()
         resizeTerminalIfNeeded()
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     private func resetCursorBlinkCycle() {
         lastCursorActivity = Date()
         cursorBlinkPhase = 0.0
-        metalView?.setNeedsRedraw()
+        metalView.setNeedsRedraw()
     }
 
     deinit {
