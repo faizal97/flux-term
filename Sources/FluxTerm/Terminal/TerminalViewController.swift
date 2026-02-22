@@ -13,6 +13,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     var renderer: MetalRenderer!
     var session: TerminalSession!
     var config = TerminalConfig()
+    var inputInterceptor: (([UInt8]) -> Void)?
 
     private var displayLink: CVDisplayLink?
     private var isRendering = false
@@ -31,8 +32,8 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     private var lastGrid: (cols: Int, rows: Int)?
     private var scrollBottomYDisp: Int = 0
 
-    private var selectionStart: CellPosition?
-    private var selectionEnd: CellPosition?
+    var selectionStart: CellPosition?
+    var selectionEnd: CellPosition?
 
     private var detectedURLs: [DetectedURL] = []
     private var hoveredURL: DetectedURL?
@@ -194,12 +195,16 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         if selectionStart != nil || selectionEnd != nil {
             selectionStart = nil
             selectionEnd = nil
-            metalView.setNeedsRedraw()
+            metalView?.setNeedsRedraw()
         }
         let bytes = encodeKey(event)
         if !bytes.isEmpty {
             resetCursorBlinkCycle()
-            session.sendInput(bytes[...])
+            if let interceptor = inputInterceptor {
+                interceptor(bytes)
+            } else {
+                session.sendInput(bytes[...])
+            }
         }
     }
 
@@ -441,7 +446,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     private func resetCursorBlinkCycle() {
         lastCursorActivity = Date()
         cursorBlinkPhase = 0.0
-        metalView.setNeedsRedraw()
+        metalView?.setNeedsRedraw()
     }
 
     deinit {
