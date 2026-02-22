@@ -1,5 +1,6 @@
 import AppKit
 import CoreVideo
+import QuartzCore
 import SwiftTerm
 
 final class TerminalViewController: NSViewController, TerminalSessionDelegate {
@@ -15,8 +16,17 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
 
     private var displayLink: CVDisplayLink?
     private var isRendering = false
-    private var cursorVisible = true
-    private var cursorTimer: Timer?
+    private var cursorBlinkPhase: Float = 0.0
+    private var cursorBlinkTimer: Timer?
+    private var lastCursorActivity: Date = Date()
+    private let cursorBlinkPeriod: TimeInterval = 1.0
+    private let cursorIdleDelay: TimeInterval = 0.5
+
+    private var displayCursorPos: SIMD2<Float> = .zero
+    private var targetCursorPos: SIMD2<Float> = .zero
+    private var cursorAnimationStartPos: SIMD2<Float> = .zero
+    private var cursorAnimationStartTime: TimeInterval = 0
+    private let cursorAnimationDuration: TimeInterval = 0.10
 
     private var lastGrid: (cols: Int, rows: Int)?
     private var scrollBottomYDisp: Int = 0
@@ -48,6 +58,12 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         session = TerminalSession(cols: grid.cols, rows: grid.rows)
         session.delegate = self
         session.start()
+        let (cursorX, cursorY) = session.terminal.getCursorLocation()
+        let initialCursorPos = SIMD2<Float>(Float(cursorX), Float(cursorY))
+        displayCursorPos = initialCursorPos
+        targetCursorPos = initialCursorPos
+        cursorAnimationStartPos = initialCursorPos
+        cursorAnimationStartTime = CACurrentMediaTime() - cursorAnimationDuration
 
         scrollBottomYDisp = session.terminal.getTopVisibleRow()
         refreshURLs()
@@ -98,10 +114,23 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     }
 
     private func setupCursorTimer() {
-        cursorTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        cursorBlinkTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.cursorVisible.toggle()
-            self.metalView.setNeedsRedraw()
+            let elapsed = Date().timeIntervalSince(self.lastCursorActivity)
+            if elapsed < self.cursorIdleDelay {
+                if self.cursorBlinkPhase != 0.0 {
+                    self.cursorBlinkPhase = 0.0
+                    self.metalView.setNeedsRedraw()
+                }
+            } else {
+                let blinkElapsed = elapsed - self.cursorIdleDelay
+                let cyclePosition = blinkElapsed.truncatingRemainder(dividingBy: self.cursorBlinkPeriod) / self.cursorBlinkPeriod
+                let newPhase = Float(cyclePosition) * 2.0 * .pi
+                if newPhase != self.cursorBlinkPhase {
+                    self.cursorBlinkPhase = newPhase
+                    self.metalView.setNeedsRedraw()
+                }
+            }
         }
     }
 
@@ -112,6 +141,24 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
 
         isRendering = true
         defer { isRendering = false }
+
+        // Update cursor animation target.
+        let (cx, cy) = session.terminal.getCursorLocation()
+        let newTarget = SIMD2<Float>(Float(cx), Float(cy))
+        if newTarget != targetCursorPos {
+            cursorAnimationStartPos = displayCursorPos
+            cursorAnimationStartTime = CACurrentMediaTime()
+            targetCursorPos = newTarget
+        }
+        displayCursorPos = interpolatedCursorPos()
+
+        // Keep redrawing while cursor is animating.
+        let animating = CACurrentMediaTime() - cursorAnimationStartTime < cursorAnimationDuration
+        if animating {
+            metalView.setNeedsRedraw()
+        }
+
+        let cursorOpacity = 0.5 + 0.5 * cos(cursorBlinkPhase)
 
         renderer.draw(
             terminal: session.terminal,
@@ -128,8 +175,19 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
                 guard let hovered = self?.hoveredURL else { return false }
                 return hovered.row == row && col >= hovered.startCol && col <= hovered.endCol
             },
-            cursorVisible: cursorVisible
+            cursorVisible: true,
+            cursorOpacity: cursorOpacity,
+            cursorDisplayPos: displayCursorPos
         )
+    }
+
+    private func interpolatedCursorPos() -> SIMD2<Float> {
+        let now = CACurrentMediaTime()
+        let elapsed = now - cursorAnimationStartTime
+        let t = min(1.0, elapsed / cursorAnimationDuration)
+        // Ease-out curve for a quick settle.
+        let eased = Float(1.0 - pow(1.0 - t, 3))
+        return cursorAnimationStartPos + (targetCursorPos - cursorAnimationStartPos) * eased
     }
 
     func handleKeyDown(_ event: NSEvent) {
@@ -413,14 +471,14 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     }
 
     private func resetCursorBlinkCycle() {
-        cursorVisible = true
-        cursorTimer?.fireDate = Date().addingTimeInterval(0.5)
+        lastCursorActivity = Date()
+        cursorBlinkPhase = 0.0
         metalView.setNeedsRedraw()
     }
 
     deinit {
         urlRefreshWorkItem?.cancel()
-        cursorTimer?.invalidate()
+        cursorBlinkTimer?.invalidate()
         if let link = displayLink {
             CVDisplayLinkStop(link)
         }

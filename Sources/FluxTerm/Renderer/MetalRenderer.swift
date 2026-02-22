@@ -14,6 +14,7 @@ final class MetalRenderer {
     private var bgPipeline: MTLRenderPipelineState!
     private var glyphPipeline: MTLRenderPipelineState!
     private var cursorPipeline: MTLRenderPipelineState!
+    private var cursorBloomPipeline: MTLRenderPipelineState!
     private var sampler: MTLSamplerState!
     private var cachedFont: CTFont
 
@@ -92,6 +93,20 @@ final class MetalRenderer {
         cursorColorAttachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         cursorColorAttachment.alphaBlendOperation = .add
         cursorPipeline = try! device.makeRenderPipelineState(descriptor: cursorDesc)
+
+        let bloomDesc = MTLRenderPipelineDescriptor()
+        bloomDesc.vertexFunction = library.makeFunction(name: "cursor_bloom_vertex")
+        bloomDesc.fragmentFunction = library.makeFunction(name: "cursor_bloom_fragment")
+        let bloomColorAttachment = bloomDesc.colorAttachments[0]!
+        bloomColorAttachment.pixelFormat = .bgra8Unorm
+        bloomColorAttachment.isBlendingEnabled = true
+        bloomColorAttachment.sourceRGBBlendFactor = .sourceAlpha
+        bloomColorAttachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        bloomColorAttachment.rgbBlendOperation = .add
+        bloomColorAttachment.sourceAlphaBlendFactor = .one
+        bloomColorAttachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        bloomColorAttachment.alphaBlendOperation = .add
+        cursorBloomPipeline = try! device.makeRenderPipelineState(descriptor: bloomDesc)
     }
 
     private func loadMetalLibrary() -> MTLLibrary {
@@ -170,7 +185,9 @@ final class MetalRenderer {
         isSelected: ((Int, Int) -> Bool)? = nil,
         isURLCell: ((Int, Int) -> Bool)? = nil,
         isHoveredURLCell: ((Int, Int) -> Bool)? = nil,
-        cursorVisible: Bool = true
+        cursorVisible: Bool = true,
+        cursorOpacity: Float = 1.0,
+        cursorDisplayPos: SIMD2<Float> = .zero
     ) {
         frameSemaphore.wait()
 
@@ -208,7 +225,7 @@ final class MetalRenderer {
 
         if cellCount > 0 {
             enc.setRenderPipelineState(bgPipeline)
-            enc.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
+            enc.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
             enc.setVertexBuffer(instanceBuffer, offset: 0, index: 1)
             enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: cellCount)
 
@@ -219,16 +236,31 @@ final class MetalRenderer {
         }
 
         if cursorVisible {
-            let (x, y) = terminal.getCursorLocation()
+            var cursorColor = config.cursorColor
+            cursorColor.w *= cursorOpacity
+
+            // Draw bloom first (behind cursor).
+            var bloomUniforms = CursorUniforms(
+                viewportSize: uniforms.viewportSize,
+                cellSize: uniforms.cellSize,
+                gridOrigin: uniforms.gridOrigin,
+                cursorPos: cursorDisplayPos,
+                cursorColor: cursorColor
+            )
+            enc.setRenderPipelineState(cursorBloomPipeline)
+            enc.setVertexBytes(&bloomUniforms, length: MemoryLayout<CursorUniforms>.stride, index: 0)
+            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+
+            // Draw cursor on top.
             var cursorUniforms = CursorUniforms(
                 viewportSize: uniforms.viewportSize,
                 cellSize: uniforms.cellSize,
                 gridOrigin: uniforms.gridOrigin,
-                cursorPos: SIMD2(Float(x), Float(y)),
-                cursorColor: config.cursorColor
+                cursorPos: cursorDisplayPos,
+                cursorColor: cursorColor
             )
             enc.setRenderPipelineState(cursorPipeline)
-            enc.setVertexBytes(&cursorUniforms, length: MemoryLayout<CursorUniforms>.size, index: 0)
+            enc.setVertexBytes(&cursorUniforms, length: MemoryLayout<CursorUniforms>.stride, index: 0)
             enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         }
 
@@ -283,24 +315,17 @@ final class MetalRenderer {
                     instance.bgColor.w = opacity
                 }
 
-                if isURLCell?(col, row) == true {
+                let isURL = isURLCell?(col, row) == true
+                let isHoveredURL = isHoveredURLCell?(col, row) == true
+                if isURL || isHoveredURL {
                     instance.fgColor = config.urlColor
-                }
-                if isHoveredURLCell?(col, row) == true {
-                    instance.fgColor = SIMD4(
-                        min(1.0, instance.fgColor.x + 0.2),
-                        min(1.0, instance.fgColor.y + 0.2),
-                        min(1.0, instance.fgColor.z + 0.2),
-                        1.0
-                    )
+                    if isHoveredURL {
+                        instance.flags.x = 1.0
+                    }
                 }
 
                 if isSelected?(col, row) == true {
-                    let tmp = instance.fgColor
-                    instance.fgColor = instance.bgColor
-                    instance.fgColor.w = 1.0
-                    instance.bgColor = tmp
-                    instance.bgColor.w = 1.0
+                    instance.bgColor = config.selectionColor
                 }
 
                 let char = terminal.getCharacter(for: cell)
