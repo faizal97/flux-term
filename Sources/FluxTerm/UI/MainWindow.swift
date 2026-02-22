@@ -1,9 +1,11 @@
 import AppKit
 
 final class MainWindow: NSWindowController {
-    var terminalVC: TerminalViewController!
+    let terminalVC: TerminalViewController
 
-    convenience init() {
+    init() {
+        terminalVC = TerminalViewController()
+
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
             styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
@@ -46,13 +48,15 @@ final class MainWindow: NSWindowController {
         contentView.autoresizingMask = [.width, .height]
         window.contentView = contentView
 
-        self.init(window: window)
+        super.init(window: window)
 
-        terminalVC = TerminalViewController()
         terminalVC.view.frame = contentView.bounds
         terminalVC.view.autoresizingMask = [.width, .height]
         contentView.addSubview(terminalVC.view)
-        terminalVC.metalView.controller = terminalVC
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 
     override func showWindow(_ sender: Any?) {

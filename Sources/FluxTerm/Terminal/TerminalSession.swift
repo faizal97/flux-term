@@ -10,22 +10,35 @@ protocol TerminalSessionDelegate: AnyObject {
 }
 
 final class TerminalSession: TerminalDelegate, LocalProcessDelegate {
-    var terminal: Terminal!
-    var process: LocalProcess!
-    weak var delegate: TerminalSessionDelegate?
+    private let initialCols: Int
+    private let initialRows: Int
 
-    init(cols: Int = 80, rows: Int = 24) {
+    lazy var terminal: Terminal = {
         let options = TerminalOptions(
-            cols: cols,
-            rows: rows,
+            cols: initialCols,
+            rows: initialRows,
             termName: "xterm-256color",
             scrollback: 10000
         )
-        terminal = Terminal(delegate: self, options: options)
-        process = LocalProcess(delegate: self)
+        return Terminal(delegate: self, options: options)
+    }()
+
+    lazy var process: LocalProcess = {
+        LocalProcess(delegate: self)
+    }()
+
+    weak var delegate: TerminalSessionDelegate?
+    private var hasStarted = false
+
+    init(cols: Int = 80, rows: Int = 24) {
+        initialCols = cols
+        initialRows = rows
     }
 
     func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+
         let shell = detectShell()
         let shellName = (shell as NSString).lastPathComponent
         process.startProcess(executable: shell, args: [], environment: nil, execName: "-\(shellName)")

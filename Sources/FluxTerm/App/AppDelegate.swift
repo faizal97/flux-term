@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setAppIcon()
         mainWindow = MainWindow()
+        mainWindow?.terminalVC.loadViewIfNeeded()
         setupMenuBar()
         wireMenuTargets()
         mainWindow?.showWindow(nil)
