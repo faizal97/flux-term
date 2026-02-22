@@ -309,7 +309,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         )
     }
 
-    private func bufferRow(for viewportRow: Int) -> Int {
+    func bufferRow(for viewportRow: Int) -> Int {
         session.terminal.buffer.yDisp + viewportRow
     }
 

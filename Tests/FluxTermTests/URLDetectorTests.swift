@@ -13,6 +13,7 @@ final class URLDetectorTests: XCTestCase {
         terminal.feed(text: "Visit https://example.com today")
 
         let detected = URLDetector.detectURLs(in: terminal)
+        // With no scrollback yet, top visible row is 0 so the URL row is 0.
         XCTAssertEqual(detected.count, 1)
         XCTAssertEqual(detected[0].url.absoluteString, "https://example.com")
         XCTAssertEqual(detected[0].row, 0)
