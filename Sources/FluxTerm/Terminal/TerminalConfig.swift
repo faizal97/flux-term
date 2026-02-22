@@ -4,7 +4,7 @@ import CoreText
 struct TerminalConfig {
     var fontName: String = "JetBrainsMono-Regular"
     var fontSize: CGFloat = 14.5
-    var backgroundOpacity: Float = 0.78
+    var backgroundOpacity: Float = 1.0
     var padding: CGFloat = 14.0
     var lineSpacingMultiplier: CGFloat = 1.15
 

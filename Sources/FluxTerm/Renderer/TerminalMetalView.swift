@@ -43,7 +43,7 @@ final class TerminalMetalView: NSView {
         metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
         metalLayer.presentsWithTransaction = false
-        metalLayer.isOpaque = false
+        metalLayer.isOpaque = true
 
         guard let queue = createdDevice.makeCommandQueue() else {
             fatalError("Failed to create Metal command queue")

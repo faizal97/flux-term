@@ -215,7 +215,13 @@ final class MetalRenderer {
         pass.colorAttachments[0].texture = drawable.texture
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        let bg = config.backgroundColor
+        pass.colorAttachments[0].clearColor = MTLClearColor(
+            red: Double(bg.x),
+            green: Double(bg.y),
+            blue: Double(bg.z),
+            alpha: 1.0
+        )
 
         guard let cmdBuf = commandQueue.makeCommandBuffer(),
               let enc = cmdBuf.makeRenderCommandEncoder(descriptor: pass) else {
