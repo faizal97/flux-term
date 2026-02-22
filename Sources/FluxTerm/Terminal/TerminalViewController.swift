@@ -168,15 +168,19 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
             drawable: drawable,
             scale: Float(view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0),
             isSelected: { [weak self] col, row in
-                self?.isSelected(col: col, row: row) ?? false
+                guard let self else { return false }
+                let bufferRow = self.bufferRow(for: row)
+                return self.isSelected(col: col, row: bufferRow)
             },
             isURLCell: { [weak self] col, row in
                 guard let self else { return false }
-                return URLDetector.urlAt(col: col, row: row, in: self.detectedURLs) != nil
+                let bufferRow = self.bufferRow(for: row)
+                return URLDetector.urlAt(col: col, row: bufferRow, in: self.detectedURLs) != nil
             },
             isHoveredURLCell: { [weak self] col, row in
-                guard let hovered = self?.hoveredURL else { return false }
-                return hovered.row == row && col >= hovered.startCol && col <= hovered.endCol
+                guard let self, let hovered = self.hoveredURL else { return false }
+                let bufferRow = self.bufferRow(for: row)
+                return hovered.row == bufferRow && col >= hovered.startCol && col <= hovered.endCol
             },
             cursorVisible: true,
             cursorOpacity: cursorOpacity,
@@ -296,12 +300,17 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
 
         let viewHeightPoints = Float(metalView.bounds.height)
         let yFromTop = viewHeightPoints - Float(point.y) - padding
-        let row = Int(yFromTop / max(1, renderer.cellHeight))
+        let viewportRow = Int(yFromTop / max(1, renderer.cellHeight))
+        let clampedViewportRow = max(0, min(viewportRow, session.terminal.rows - 1))
 
         return CellPosition(
             col: max(0, min(col, session.terminal.cols - 1)),
-            row: max(0, min(row, session.terminal.rows - 1))
+            row: bufferRow(for: clampedViewportRow)
         )
+    }
+
+    func bufferRow(for viewportRow: Int) -> Int {
+        session.terminal.buffer.yDisp + viewportRow
     }
 
     private func normalizeSelection(start: CellPosition, end: CellPosition) -> (Int, Int, Int, Int) {
@@ -336,7 +345,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
 
         var output = ""
         for row in startRow...endRow {
-            guard let line = session.terminal.getLine(row: row) else { continue }
+            guard let line = session.terminal.getScrollInvariantLine(row: row) else { continue }
             let c0 = row == startRow ? startCol : 0
             let c1 = row == endRow ? endCol : session.terminal.cols - 1
 
@@ -421,8 +430,9 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     }
 
     @objc override func selectAll(_ sender: Any?) {
-        selectionStart = CellPosition(col: 0, row: 0)
-        selectionEnd = CellPosition(col: session.terminal.cols - 1, row: session.terminal.rows - 1)
+        let topVisibleRow = session.terminal.getTopVisibleRow()
+        selectionStart = CellPosition(col: 0, row: topVisibleRow)
+        selectionEnd = CellPosition(col: session.terminal.cols - 1, row: topVisibleRow + session.terminal.rows - 1)
         metalView?.setNeedsRedraw()
     }
 

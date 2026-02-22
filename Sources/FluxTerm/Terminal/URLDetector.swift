@@ -16,9 +16,10 @@ enum URLDetector {
 
     static func detectURLs(in terminal: Terminal) -> [DetectedURL] {
         var results: [DetectedURL] = []
+        let topVisibleRow = terminal.getTopVisibleRow()
 
-        for row in 0..<terminal.rows {
-            guard let line = terminal.getLine(row: row) else { continue }
+        for viewportRow in 0..<terminal.rows {
+            guard let line = terminal.getLine(row: viewportRow) else { continue }
             let text = line.translateToString()
             let sanitized = text.replacingOccurrences(of: "\u{0000}", with: " ")
             let range = NSRange(sanitized.startIndex..<sanitized.endIndex, in: sanitized)
@@ -30,7 +31,8 @@ enum URLDetector {
 
                 let startCol = sanitized.distance(from: sanitized.startIndex, to: swiftRange.lowerBound)
                 let endCol = max(startCol, sanitized.distance(from: sanitized.startIndex, to: swiftRange.upperBound) - 1)
-                results.append(DetectedURL(url: url, startCol: startCol, endCol: endCol, row: row))
+                let bufferRow = topVisibleRow + viewportRow
+                results.append(DetectedURL(url: url, startCol: startCol, endCol: endCol, row: bufferRow))
             }
         }
 

@@ -13,6 +13,7 @@ final class URLDetectorTests: XCTestCase {
         terminal.feed(text: "Visit https://example.com today")
 
         let detected = URLDetector.detectURLs(in: terminal)
+        // With no scrollback yet, top visible row is 0 so the URL row is 0.
         XCTAssertEqual(detected.count, 1)
         XCTAssertEqual(detected[0].url.absoluteString, "https://example.com")
         XCTAssertEqual(detected[0].row, 0)
@@ -54,5 +55,36 @@ final class URLDetectorTests: XCTestCase {
         terminal.feed(text: "no links here")
 
         XCTAssertTrue(URLDetector.detectURLs(in: terminal).isEmpty)
+    }
+
+    func testDetectRowsAreScrollInvariantWhenScrolledBack() {
+        let terminal = makeTerminal(cols: 120, rows: 3)
+        let lines = (0..<7).map { "line-\($0) https://example\($0).com" }
+        terminal.feed(text: lines.joined(separator: "\r\n"))
+
+        let liveTop = terminal.getTopVisibleRow()
+        XCTAssertGreaterThan(liveTop, 0, "Expected scrollback after feeding more lines than viewport")
+
+        let scrolledTop = max(0, liveTop - 2)
+        terminal.buffer.yDisp = scrolledTop
+
+        let detected = URLDetector.detectURLs(in: terminal)
+        XCTAssertFalse(detected.isEmpty, "Expected URLs on visible scrolled rows")
+        XCTAssertEqual(detected.count, terminal.rows, "Expected one URL per visible row")
+        XCTAssertTrue(
+            detected.allSatisfy { $0.row >= scrolledTop && $0.row < scrolledTop + terminal.rows },
+            "Detected URL rows should be scroll-invariant buffer rows within the visible window"
+        )
+
+        let expectedRows = Array(scrolledTop..<(scrolledTop + terminal.rows))
+        XCTAssertEqual(detected.map(\.row), expectedRows, "Detected rows should exactly match the visible scrollback window")
+
+        for row in expectedRows {
+            guard let match = detected.first(where: { $0.row == row }) else {
+                XCTFail("Missing detected URL for row \(row)")
+                return
+            }
+            XCTAssertEqual(match.url.absoluteString, "https://example\(row).com")
+        }
     }
 }
