@@ -1,0 +1,165 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Update Info.plist version
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Info.plist
+
+      - name: Build arm64
+        run: swift build -c release --arch arm64
+
+      - name: Build x86_64
+        run: swift build -c release --arch x86_64
+
+      - name: Create universal binary
+        run: |
+          lipo -create \
+            .build/arm64-apple-macosx/release/FluxTerm \
+            .build/x86_64-apple-macosx/release/FluxTerm \
+            -output /tmp/FluxTerm-universal
+
+      - name: Generate .icns
+        run: |
+          ICON_SRC="Sources/FluxTerm/Resources/AppIcon.png"
+          ICONSET="/tmp/AppIcon.iconset"
+          mkdir -p "$ICONSET"
+          sips -z 16 16     "$ICON_SRC" --out "$ICONSET/icon_16x16.png"      > /dev/null
+          sips -z 32 32     "$ICON_SRC" --out "$ICONSET/icon_16x16@2x.png"   > /dev/null
+          sips -z 32 32     "$ICON_SRC" --out "$ICONSET/icon_32x32.png"      > /dev/null
+          sips -z 64 64     "$ICON_SRC" --out "$ICONSET/icon_32x32@2x.png"   > /dev/null
+          sips -z 128 128   "$ICON_SRC" --out "$ICONSET/icon_128x128.png"    > /dev/null
+          sips -z 256 256   "$ICON_SRC" --out "$ICONSET/icon_128x128@2x.png" > /dev/null
+          sips -z 256 256   "$ICON_SRC" --out "$ICONSET/icon_256x256.png"    > /dev/null
+          sips -z 512 512   "$ICON_SRC" --out "$ICONSET/icon_256x256@2x.png" > /dev/null
+          sips -z 512 512   "$ICON_SRC" --out "$ICONSET/icon_512x512.png"    > /dev/null
+          sips -z 1024 1024 "$ICON_SRC" --out "$ICONSET/icon_512x512@2x.png" > /dev/null
+          iconutil -c icns "$ICONSET" -o /tmp/AppIcon.icns
+
+      - name: Create .app bundle
+        run: |
+          BUNDLE="dist/FluxTerm.app/Contents"
+          mkdir -p "$BUNDLE/MacOS" "$BUNDLE/Resources"
+          cp /tmp/FluxTerm-universal "$BUNDLE/MacOS/FluxTerm"
+          chmod +x "$BUNDLE/MacOS/FluxTerm"
+          cp Info.plist "$BUNDLE/Info.plist"
+          cp /tmp/AppIcon.icns "$BUNDLE/Resources/AppIcon.icns"
+          cp -R .build/arm64-apple-macosx/release/FluxTerm_FluxTerm.bundle "$BUNDLE/Resources/"
+
+      - name: Package artifacts
+        run: |
+          cd dist && zip -r /tmp/FluxTerm.app.zip FluxTerm.app
+          cp ${{ github.workspace }}/.build/arm64-apple-macosx/release/FluxTerm /tmp/FluxTerm-arm64
+          cp ${{ github.workspace }}/.build/x86_64-apple-macosx/release/FluxTerm /tmp/FluxTerm-x86_64
+          cd /tmp
+          zip FluxTerm-macos-arm64.zip FluxTerm-arm64
+          zip FluxTerm-macos-x86_64.zip FluxTerm-x86_64
+          zip FluxTerm-macos-universal.zip FluxTerm-universal
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          echo "app=$(shasum -a 256 /tmp/FluxTerm.app.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "arm64=$(shasum -a 256 /tmp/FluxTerm-macos-arm64.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "x86_64=$(shasum -a 256 /tmp/FluxTerm-macos-x86_64.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            /tmp/FluxTerm.app.zip \
+            /tmp/FluxTerm-macos-arm64.zip \
+            /tmp/FluxTerm-macos-x86_64.zip \
+            /tmp/FluxTerm-macos-universal.zip \
+            --title "FluxTerm ${{ steps.version.outputs.version }}" \
+            --generate-notes
+
+      - name: Update Homebrew Tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA_APP="${{ steps.sha.outputs.app }}"
+          SHA_ARM="${{ steps.sha.outputs.arm64 }}"
+          SHA_X86="${{ steps.sha.outputs.x86_64 }}"
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/faizal97/homebrew-tap.git" /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+
+          # Write Cask
+          cat > Casks/fluxterm.rb <<EOF
+cask "fluxterm" do
+  version "${VERSION}"
+  sha256 "${SHA_APP}"
+
+  url "https://github.com/faizal97/flux-term/releases/download/v#{version}/FluxTerm.app.zip"
+  name "FluxTerm"
+  desc "GPU-accelerated macOS terminal emulator built with Swift and Metal"
+  homepage "https://github.com/faizal97/flux-term"
+
+  depends_on macos: ">= :sonoma"
+
+  app "FluxTerm.app"
+
+  zap trash: [
+    "~/Library/Caches/com.faizal.fluxterm",
+    "~/Library/Preferences/com.faizal.fluxterm.plist",
+  ]
+end
+EOF
+
+          # Write Formula
+          cat > Formula/fluxterm.rb <<EOF
+class Fluxterm < Formula
+  desc "GPU-accelerated macOS terminal emulator built with Swift and Metal"
+  homepage "https://github.com/faizal97/flux-term"
+  version "${VERSION}"
+  license "MIT"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/faizal97/flux-term/releases/download/v${VERSION}/FluxTerm-macos-arm64.zip"
+      sha256 "${SHA_ARM}"
+    else
+      url "https://github.com/faizal97/flux-term/releases/download/v${VERSION}/FluxTerm-macos-x86_64.zip"
+      sha256 "${SHA_X86}"
+    end
+  end
+
+  depends_on :macos
+  depends_on macos: :sonoma
+
+  def install
+    bin.install "FluxTerm-arm64" => "fluxterm" if Hardware::CPU.arm?
+    bin.install "FluxTerm-x86_64" => "fluxterm" unless Hardware::CPU.arm?
+  end
+
+  test do
+    assert_predicate bin/"fluxterm", :executable?
+  end
+end
+EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update FluxTerm to ${VERSION}"
+          git push
