@@ -88,6 +88,7 @@ final class TerminalMetalView: NSView {
     }
 
     override var acceptsFirstResponder: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func becomeFirstResponder() -> Bool {
         true
