@@ -55,10 +55,12 @@ class Fluxterm < Formula
   def install
     bin.install "FluxTerm-arm64" => "fluxterm" if Hardware::CPU.arm?
     bin.install "FluxTerm-x86_64" => "fluxterm" unless Hardware::CPU.arm?
+    bin.install "FluxTerm_FluxTerm.bundle"
   end
 
   test do
     assert_predicate bin/"fluxterm", :executable?
+    assert_predicate bin/"FluxTerm_FluxTerm.bundle", :exist?
   end
 end
 EOF
