@@ -17,6 +17,10 @@ final class KeyInputPipelineTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        // Intentionally keep TerminalViewController in its pre-load state in setUp:
+        // we do not call loadView, so metalView/renderer/session remain nil. These
+        // tests exercise handleKeyDown routing only, and inputInterceptor must be
+        // installed so handleKeyDown does not try to write through session.
         controller = TerminalViewController()
         capturedBytes = []
         controller.inputInterceptor = { [weak self] bytes in
