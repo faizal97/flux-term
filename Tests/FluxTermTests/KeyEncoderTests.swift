@@ -286,6 +286,90 @@ final class KeyEncoderTests: XCTestCase {
         XCTAssertEqual(result, [0x1B, 0x2E], "Alt+. should produce \\e.")
     }
 
+    // MARK: - Alt/Option+Letter: Layout Independence
+    //
+    // `characters` varies by keyboard layout (US: "∫", German: "ß", etc.).
+    // The encoder must always use `charactersIgnoringModifiers` instead.
+
+    func testOptionLetterIgnoresCharactersValue() {
+        // Same key+modifier, different characters values from different layouts
+        let cases: [(UInt16, String, String)] = [
+            (11, "b", "∫"),     // US
+            (11, "b", "ß"),     // German
+            (11, "b", "∏"),     // hypothetical
+            (3,  "f", "ƒ"),     // US
+            (3,  "f", "·"),     // hypothetical
+            (2,  "d", "∂"),     // US
+            (14, "e", "´"),     // US: acute accent dead key
+            (32, "u", "¨"),     // US: umlaut dead key
+            (34, "i", "ˆ"),     // US: circumflex dead key
+            (45, "n", "˜"),     // US: tilde dead key
+        ]
+        for (keyCode, rawLetter, layoutChars) in cases {
+            let expected: [UInt8] = [0x1B, UInt8(rawLetter.unicodeScalars.first!.value)]
+            let result = encode(
+                keyCode: keyCode,
+                modifiers: .option,
+                characters: layoutChars,
+                charactersIgnoringModifiers: rawLetter
+            )
+            XCTAssertEqual(result, expected,
+                "Option+\(rawLetter) with characters=\"\(layoutChars)\" should produce \\e\(rawLetter)")
+        }
+    }
+
+    func testOptionBOutputIdenticalAcrossLayouts() {
+        let expected: [UInt8] = [0x1B, 0x62]
+        for layoutChars in ["∫", "ß", "β", "♭"] {
+            let result = encode(
+                keyCode: 11,
+                modifiers: .option,
+                characters: layoutChars,
+                charactersIgnoringModifiers: "b"
+            )
+            XCTAssertEqual(result, expected,
+                "Option+b with characters=\"\(layoutChars)\" should still produce \\eb")
+        }
+    }
+
+    // MARK: - Device-Level Modifier Flags
+    //
+    // Real arrow/F-key events include .numericPad and .function in modifierFlags.
+    // The encoder must not treat these as Shift/Ctrl/Alt modifiers.
+
+    func testBareArrowWithDeviceFlags() {
+        let result = encode(keyCode: 123, modifiers: [.numericPad, .function], charactersIgnoringModifiers: "\u{F702}")
+        XCTAssertEqual(hex(result), "1b 5b 44", "Bare left with .numericPad/.function → \\e[D")
+    }
+
+    func testCtrlArrowWithDeviceFlags() {
+        let result = encode(keyCode: 123, modifiers: [.control, .numericPad, .function], charactersIgnoringModifiers: "\u{F702}")
+        XCTAssertEqual(hex(result), "1b 5b 31 3b 35 44", "Ctrl+Left with device flags → \\e[1;5D")
+    }
+
+    func testShiftArrowWithDeviceFlags() {
+        let result = encode(keyCode: 124, modifiers: [.shift, .numericPad, .function], charactersIgnoringModifiers: "\u{F703}")
+        XCTAssertEqual(hex(result), "1b 5b 31 3b 32 43", "Shift+Right with device flags → \\e[1;2C")
+    }
+
+    func testCtrlShiftArrowWithDeviceFlags() {
+        let result = encode(keyCode: 125, modifiers: [.control, .shift, .numericPad, .function], charactersIgnoringModifiers: "\u{F701}")
+        XCTAssertEqual(hex(result), "1b 5b 31 3b 36 42", "Ctrl+Shift+Down with device flags → \\e[1;6B")
+    }
+
+    func testCtrlAltShiftArrowWithDeviceFlags() {
+        let result = encode(keyCode: 123, modifiers: [.control, .option, .shift, .numericPad, .function], charactersIgnoringModifiers: "\u{F702}")
+        XCTAssertEqual(hex(result), "1b 5b 31 3b 38 44", "Ctrl+Alt+Shift+Left with device flags → \\e[1;8D")
+    }
+
+    func testFKeyWithFunctionFlag() {
+        let f1 = encode(keyCode: 122, modifiers: .function, charactersIgnoringModifiers: "\u{F704}")
+        XCTAssertEqual(hex(f1), "1b 4f 50", "F1 with .function flag → \\eOP")
+
+        let f10 = encode(keyCode: 109, modifiers: .function, charactersIgnoringModifiers: "\u{F70D}")
+        XCTAssertEqual(hex(f10), "1b 5b 32 31 7e", "F10 with .function flag → \\e[21~")
+    }
+
     // MARK: - Command Suppression
 
     func testCommandKeySuppressed() {
