@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreText
+import Foundation
 import Metal
 
 struct GlyphInfo {
@@ -23,6 +24,12 @@ struct GlyphInfo {
 }
 
 final class GlyphAtlas {
+    private enum AtlasSlotReservation {
+        case placed(x: Int, y: Int, generation: UInt64)
+        case pendingGrowth
+        case oversized
+    }
+
     struct CacheKey: Hashable {
         let glyph: CGGlyph
         let bold: Bool
@@ -33,21 +40,41 @@ final class GlyphAtlas {
     let commandQueue: MTLCommandQueue
     private(set) var texture: MTLTexture!
 
-    private var atlasWidth: Int = 1024
+    private let initialAtlasWidth: Int = 1024
     private let initialAtlasHeight: Int = 1024
-    private var atlasHeight: Int = 1024
+    private let maxTextureDimension: Int = 8192
+    private let stateLock = NSLock()
+    private var atlasWidth: Int
+    private var atlasHeight: Int
     private var cursorX: Int = 0
     private var cursorY: Int = 0
     private var rowHeight: Int = 0
+    private var growthInFlight = false
+    private var atlasGeneration: UInt64 = 0
     private var cache: [CacheKey: GlyphInfo] = [:]
 
     init(device: MTLDevice, commandQueue: MTLCommandQueue) {
         self.device = device
         self.commandQueue = commandQueue
+        self.atlasWidth = initialAtlasWidth
+        self.atlasHeight = initialAtlasHeight
         texture = createTexture(width: atlasWidth, height: atlasHeight)
     }
 
+    private func withStateLock<T>(_ body: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return body()
+    }
+
     private func createTexture(width: Int, height: Int) -> MTLTexture {
+        guard let texture = makeTexture(width: width, height: height) else {
+            fatalError("Failed to create glyph atlas texture")
+        }
+        return texture
+    }
+
+    private func makeTexture(width: Int, height: Int) -> MTLTexture? {
         let desc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .r8Unorm,
             width: width,
@@ -56,15 +83,12 @@ final class GlyphAtlas {
         )
         desc.usage = [.shaderRead]
         desc.storageMode = .shared
-        guard let texture = device.makeTexture(descriptor: desc) else {
-            fatalError("Failed to create glyph atlas texture")
-        }
-        return texture
+        return device.makeTexture(descriptor: desc)
     }
 
     func lookup(glyph: CGGlyph, font: CTFont, bold: Bool = false, italic: Bool = false) -> GlyphInfo {
         let key = CacheKey(glyph: glyph, bold: bold, italic: italic)
-        if let cached = cache[key] {
+        if let cached = withStateLock({ cache[key] }) {
             return cached
         }
         return rasterize(glyph: glyph, font: font, key: key)
@@ -83,16 +107,14 @@ final class GlyphAtlas {
         let bh = Int(ceil(bbox.height)) + 2 * pad
 
         guard bw > 0, bh > 0 else {
-            let info = GlyphInfo(
-                atlasX: 0,
-                atlasY: 0,
-                width: 0,
-                height: 0,
-                bearingX: 0,
-                bearingY: 0,
-                advance: Float(advance.width)
-            )
-            cache[key] = info
+            let info = makeAdvanceOnlyGlyphInfo(advance: advance)
+            withStateLock { cache[key] = info }
+            return info
+        }
+
+        if bw > maxTextureDimension || bh > maxTextureDimension {
+            let info = makeAdvanceOnlyGlyphInfo(advance: advance)
+            withStateLock { cache[key] = info }
             return info
         }
 
@@ -121,72 +143,169 @@ final class GlyphAtlas {
         var pos = CGPoint(x: CGFloat(pad) - bbox.origin.x, y: CGFloat(pad) - bbox.origin.y)
         CTFontDrawGlyphs(font, &g, &pos, 1, ctx)
 
-        if cursorX + bw > atlasWidth {
-            cursorX = 0
-            cursorY += rowHeight
-            rowHeight = 0
+        let reservation = reserveSlot(width: bw, height: bh)
+        switch reservation {
+        case .pendingGrowth:
+            return makeAdvanceOnlyGlyphInfo(advance: advance)
+        case .oversized:
+            let info = makeAdvanceOnlyGlyphInfo(advance: advance)
+            withStateLock { cache[key] = info }
+            return info
+        case .placed(let atlasX, let atlasY, let generation):
+            return withStateLock {
+                guard atlasGeneration == generation else {
+                    return makeAdvanceOnlyGlyphInfo(advance: advance)
+                }
+
+                let region = MTLRegion(
+                    origin: MTLOrigin(x: atlasX, y: atlasY, z: 0),
+                    size: MTLSize(width: bw, height: bh, depth: 1)
+                )
+                texture.replace(region: region, mipmapLevel: 0, withBytes: raw, bytesPerRow: bytesPerRow)
+
+                let info = GlyphInfo(
+                    atlasX: atlasX,
+                    atlasY: atlasY,
+                    width: bw,
+                    height: bh,
+                    bearingX: Float(bbox.origin.x) - Float(pad),
+                    bearingY: Float(bbox.origin.y + bbox.height) + Float(pad),
+                    advance: Float(advance.width)
+                )
+                cache[key] = info
+                return info
+            }
         }
-        if cursorY + bh > atlasHeight {
-            growAtlas()
-        }
-
-        let region = MTLRegion(
-            origin: MTLOrigin(x: cursorX, y: cursorY, z: 0),
-            size: MTLSize(width: bw, height: bh, depth: 1)
-        )
-        texture.replace(region: region, mipmapLevel: 0, withBytes: raw, bytesPerRow: bytesPerRow)
-
-        let info = GlyphInfo(
-            atlasX: cursorX,
-            atlasY: cursorY,
-            width: bw,
-            height: bh,
-            bearingX: Float(bbox.origin.x) - Float(pad),
-            bearingY: Float(bbox.origin.y + bbox.height) + Float(pad),
-            advance: Float(advance.width)
-        )
-        cache[key] = info
-
-        cursorX += bw
-        rowHeight = max(rowHeight, bh)
-
-        return info
     }
 
-    private func growAtlas() {
-        let newHeight = atlasHeight * 2
-        let newTexture = createTexture(width: atlasWidth, height: newHeight)
+    private func makeAdvanceOnlyGlyphInfo(advance: CGSize) -> GlyphInfo {
+        GlyphInfo(
+            atlasX: 0,
+            atlasY: 0,
+            width: 0,
+            height: 0,
+            bearingX: 0,
+            bearingY: 0,
+            advance: Float(advance.width)
+        )
+    }
+
+    private func reserveSlot(width: Int, height: Int) -> AtlasSlotReservation {
+        withStateLock {
+            if growthInFlight {
+                return .pendingGrowth
+            }
+
+            var slotX = cursorX
+            var slotY = cursorY
+            var candidateRowHeight = rowHeight
+
+            if slotX + width > atlasWidth {
+                slotX = 0
+                slotY += candidateRowHeight
+                candidateRowHeight = 0
+            }
+
+            let requiredWidth = max(atlasWidth, width)
+            let requiredHeight = slotY + height
+            if requiredWidth > atlasWidth || requiredHeight > atlasHeight {
+                if requiredWidth > maxTextureDimension || requiredHeight > maxTextureDimension {
+                    return .oversized
+                }
+
+                _ = scheduleGrowthLocked(minWidth: requiredWidth, minHeight: requiredHeight)
+                return .pendingGrowth
+            }
+
+            cursorX = slotX + width
+            cursorY = slotY
+            rowHeight = max(candidateRowHeight, height)
+
+            return .placed(x: slotX, y: slotY, generation: atlasGeneration)
+        }
+    }
+
+    private func scheduleGrowthLocked(minWidth: Int, minHeight: Int) -> Bool {
+        let targetWidth = grownDimension(current: atlasWidth, minimum: minWidth)
+        let targetHeight = grownDimension(current: atlasHeight, minimum: minHeight)
+
+        guard targetWidth <= maxTextureDimension, targetHeight <= maxTextureDimension else {
+            return false
+        }
+
+        let oldTexture = texture!
+        let oldWidth = atlasWidth
+        let oldHeight = atlasHeight
+        let generation = atlasGeneration
+
+        guard let newTexture = makeTexture(width: targetWidth, height: targetHeight) else {
+            return false
+        }
 
         guard let cmdBuf = commandQueue.makeCommandBuffer(),
               let blit = cmdBuf.makeBlitCommandEncoder() else {
-            return
+            return false
         }
 
+        growthInFlight = true
+
         blit.copy(
-            from: texture,
+            from: oldTexture,
             sourceSlice: 0,
             sourceLevel: 0,
             sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-            sourceSize: MTLSize(width: atlasWidth, height: atlasHeight, depth: 1),
+            sourceSize: MTLSize(width: oldWidth, height: oldHeight, depth: 1),
             to: newTexture,
             destinationSlice: 0,
             destinationLevel: 0,
             destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
         )
         blit.endEncoding()
-        cmdBuf.commit()
-        cmdBuf.waitUntilCompleted()
 
-        texture = newTexture
-        atlasHeight = newHeight
+        cmdBuf.addCompletedHandler { [weak self] buffer in
+            guard let self else { return }
+            self.withStateLock {
+                defer { self.growthInFlight = false }
+
+                guard self.atlasGeneration == generation else {
+                    return
+                }
+                guard buffer.status == .completed else {
+                    return
+                }
+
+                self.texture = newTexture
+                self.atlasWidth = targetWidth
+                self.atlasHeight = targetHeight
+            }
+        }
+        cmdBuf.commit()
+
+        return true
+    }
+
+    private func grownDimension(current: Int, minimum: Int) -> Int {
+        var dimension = max(1, current)
+        while dimension < minimum {
+            if dimension >= maxTextureDimension {
+                return maxTextureDimension
+            }
+            dimension = min(dimension * 2, maxTextureDimension)
+        }
+        return dimension
     }
 
     func clearCache() {
-        cache.removeAll()
-        cursorX = 0
-        cursorY = 0
-        rowHeight = 0
-        atlasHeight = initialAtlasHeight
-        texture = createTexture(width: atlasWidth, height: atlasHeight)
+        withStateLock {
+            cache.removeAll()
+            cursorX = 0
+            cursorY = 0
+            rowHeight = 0
+            atlasGeneration &+= 1
+            growthInFlight = false
+            atlasWidth = initialAtlasWidth
+            atlasHeight = initialAtlasHeight
+            texture = createTexture(width: atlasWidth, height: atlasHeight)
+        }
     }
 }
