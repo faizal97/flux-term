@@ -1,0 +1,41 @@
+name: Bug report
+description: Report an issue that should be fixed
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the bug you encountered
+      placeholder: What happened?
+    validations:
+      required: true
+
+  - type: input
+    id: fluxterm-version
+    attributes:
+      label: FluxTerm version
+      description: What version of FluxTerm are you using?
+    validations:
+      required: false
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshot-or-link
+    attributes:
+      label: Screenshot and/or share link
+      description: Run `/share` to get a share link, or attach a screenshot
+      placeholder: Paste link or drag and drop screenshot here
+    validations:
+      required: false
