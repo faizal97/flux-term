@@ -426,7 +426,25 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     @objc func paste(_ sender: Any?) {
         guard let text = NSPasteboard.general.string(forType: .string) else { return }
         resetCursorBlinkCycle()
-        session.sendInput(text)
+        let payload = encodedPastePayload(for: text)
+        session.sendInput(payload[...])
+    }
+
+    func encodedPastePayload(for text: String) -> [UInt8] {
+        guard !session.terminal.bracketedPasteMode else {
+            var payload: [UInt8] = []
+            payload.reserveCapacity(
+                EscapeSequences.bracketedPasteStart.count +
+                text.utf8.count +
+                EscapeSequences.bracketedPasteEnd.count
+            )
+            payload.append(contentsOf: EscapeSequences.bracketedPasteStart)
+            payload.append(contentsOf: text.utf8)
+            payload.append(contentsOf: EscapeSequences.bracketedPasteEnd)
+            return payload
+        }
+
+        return Array(text.utf8)
     }
 
     @objc override func selectAll(_ sender: Any?) {
