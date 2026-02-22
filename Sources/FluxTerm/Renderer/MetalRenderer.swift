@@ -159,10 +159,14 @@ final class MetalRenderer {
     private func loadMetalLibrary() throws -> MTLLibrary {
         var errors: [String] = []
 
-        do {
-            return try device.makeDefaultLibrary(bundle: .module)
-        } catch {
-            errors.append("module default library: \(error.localizedDescription)")
+        if let moduleBundle = AppResources.moduleBundle {
+            do {
+                return try device.makeDefaultLibrary(bundle: moduleBundle)
+            } catch {
+                errors.append("module default library: \(error.localizedDescription)")
+            }
+        } else {
+            errors.append("module resource bundle unavailable")
         }
 
         if let lib = device.makeDefaultLibrary() {
@@ -184,8 +188,7 @@ final class MetalRenderer {
     }
 
     private func loadShaderSource() -> String? {
-        let bundles: [Bundle] = [.module, .main]
-        for bundle in bundles {
+        for bundle in AppResources.searchBundles {
             if let url = bundle.url(forResource: "Shaders", withExtension: "metal"),
                let source = try? String(contentsOf: url, encoding: .utf8) {
                 return source

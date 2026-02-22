@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setAppIcon() {
-        guard let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
+        guard let url = AppResources.url(forResource: "AppIcon", withExtension: "png"),
               let image = NSImage(contentsOf: url) else { return }
         NSApp.applicationIconImage = image
     }

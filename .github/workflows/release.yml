@@ -67,10 +67,13 @@ jobs:
         run: |
           cd dist && zip -r /tmp/FluxTerm.app.zip FluxTerm.app
           cp ${{ github.workspace }}/.build/arm64-apple-macosx/release/FluxTerm /tmp/FluxTerm-arm64
+          cp -R ${{ github.workspace }}/.build/arm64-apple-macosx/release/FluxTerm_FluxTerm.bundle /tmp/FluxTerm_FluxTerm.bundle
           cp ${{ github.workspace }}/.build/x86_64-apple-macosx/release/FluxTerm /tmp/FluxTerm-x86_64
           cd /tmp
-          zip FluxTerm-macos-arm64.zip FluxTerm-arm64
-          zip FluxTerm-macos-x86_64.zip FluxTerm-x86_64
+          zip -r FluxTerm-macos-arm64.zip FluxTerm-arm64 FluxTerm_FluxTerm.bundle
+          rm -rf /tmp/FluxTerm_FluxTerm.bundle
+          cp -R ${{ github.workspace }}/.build/x86_64-apple-macosx/release/FluxTerm_FluxTerm.bundle /tmp/FluxTerm_FluxTerm.bundle
+          zip -r FluxTerm-macos-x86_64.zip FluxTerm-x86_64 FluxTerm_FluxTerm.bundle
           zip FluxTerm-macos-universal.zip FluxTerm-universal
 
       - name: Compute SHA256
