@@ -15,7 +15,13 @@ final class MainWindow: NSWindowController {
         window.isReleasedWhenClosed = false
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.backgroundColor = .clear
+        window.backgroundColor = NSColor(
+            red: 0.118,
+            green: 0.118,
+            blue: 0.180,
+            alpha: 1.0
+        )
+        window.isOpaque = true
         window.minSize = NSSize(width: 500, height: 320)
         window.isMovableByWindowBackground = true
 
@@ -29,19 +35,23 @@ final class MainWindow: NSWindowController {
             zoomButton.setFrameOrigin(NSPoint(x: 54, y: y))
         }
 
-        let visualEffectView = NSVisualEffectView(frame: window.contentLayoutRect)
-        visualEffectView.autoresizingMask = [.width, .height]
-        visualEffectView.material = .sidebar
-        visualEffectView.blendingMode = .behindWindow
-        visualEffectView.state = .active
-        window.contentView = visualEffectView
+        let contentView = NSView(frame: window.contentRect(forFrameRect: window.frame))
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor(
+            red: 0.118,
+            green: 0.118,
+            blue: 0.180,
+            alpha: 1.0
+        ).cgColor
+        contentView.autoresizingMask = [.width, .height]
+        window.contentView = contentView
 
         self.init(window: window)
 
         terminalVC = TerminalViewController()
-        terminalVC.view.frame = visualEffectView.bounds
+        terminalVC.view.frame = contentView.bounds
         terminalVC.view.autoresizingMask = [.width, .height]
-        visualEffectView.addSubview(terminalVC.view)
+        contentView.addSubview(terminalVC.view)
         terminalVC.metalView.controller = terminalVC
     }
 
