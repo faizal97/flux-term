@@ -21,7 +21,7 @@ final class KeyInputPipelineTests: XCTestCase {
         // we do not call loadView because these tests exercise handleKeyDown routing
         // only. inputInterceptor is installed to capture bytes instead of writing to
         // the underlying session.
-        controller = TerminalViewController()
+        controller = try! TerminalViewController()
         capturedBytes = []
         controller.inputInterceptor = { [weak self] bytes in
             self?.capturedBytes.append(bytes)

@@ -3,8 +3,13 @@ import AppKit
 final class MainWindow: NSWindowController {
     let terminalVC: TerminalViewController
 
-    init() {
-        terminalVC = TerminalViewController()
+    static func make() throws -> MainWindow {
+        let terminalVC = try TerminalViewController()
+        return MainWindow(terminalVC: terminalVC)
+    }
+
+    private init(terminalVC: TerminalViewController) {
+        self.terminalVC = terminalVC
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),

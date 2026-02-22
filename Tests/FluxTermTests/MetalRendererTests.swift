@@ -18,4 +18,19 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertEqual(grid.cols, 80)
         XCTAssertEqual(grid.rows, 24)
     }
+
+    func testInitializationErrorPipelineMessageIncludesContext() {
+        let underlying = NSError(
+            domain: "FluxTermTests",
+            code: 42,
+            userInfo: [NSLocalizedDescriptionKey: "mock shader compile failure"]
+        )
+        let error = MetalRenderer.InitializationError.pipelineCreationFailed(
+            name: "glyph",
+            underlying: underlying
+        )
+
+        XCTAssertTrue(error.localizedDescription.contains("glyph"))
+        XCTAssertTrue(error.localizedDescription.contains("mock shader compile failure"))
+    }
 }
