@@ -7,6 +7,7 @@ struct CellInstance {
     var glyphSize: SIMD2<Float> = .zero
     var fgColor: SIMD4<Float> = .init(1, 1, 1, 1)
     var bgColor: SIMD4<Float> = .init(0, 0, 0, 0)
+    var flags: SIMD4<Float> = .zero  // x: underline (0 or 1), y-w: reserved
 }
 
 struct Uniforms {
