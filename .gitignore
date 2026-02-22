@@ -1,0 +1,4 @@
+.build/
+.serena/
+.swiftpm/
+dist/
