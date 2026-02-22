@@ -55,4 +55,23 @@ final class URLDetectorTests: XCTestCase {
 
         XCTAssertTrue(URLDetector.detectURLs(in: terminal).isEmpty)
     }
+
+    func testDetectRowsAreScrollInvariantWhenScrolledBack() {
+        let terminal = makeTerminal(cols: 120, rows: 3)
+        let lines = (0..<7).map { "line-\($0) https://example\($0).com" }
+        terminal.feed(text: lines.joined(separator: "\r\n"))
+
+        let liveTop = terminal.getTopVisibleRow()
+        XCTAssertGreaterThan(liveTop, 0, "Expected scrollback after feeding more lines than viewport")
+
+        let scrolledTop = max(0, liveTop - 2)
+        terminal.buffer.yDisp = scrolledTop
+
+        let detected = URLDetector.detectURLs(in: terminal)
+        XCTAssertFalse(detected.isEmpty, "Expected URLs on visible scrolled rows")
+        XCTAssertTrue(
+            detected.allSatisfy { $0.row >= scrolledTop && $0.row < scrolledTop + terminal.rows },
+            "Detected URL rows should be scroll-invariant buffer rows within the visible window"
+        )
+    }
 }
