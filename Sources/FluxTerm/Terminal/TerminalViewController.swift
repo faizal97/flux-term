@@ -1,5 +1,4 @@
 import AppKit
-import CoreVideo
 import QuartzCore
 import SwiftTerm
 
@@ -16,8 +15,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     // Visible for testing: lets KeyInputPipelineTests intercept handleKeyDown bytes.
     var inputInterceptor: (([UInt8]) -> Void)?
 
-    private var displayLink: CVDisplayLink?
-    private var isRendering = false
+    private var displayLink: CADisplayLink?
     private var cursorBlinkPhase: Float = 0.0
     private var cursorBlinkTimer: Timer?
     private var lastCursorActivity: Date = Date()
@@ -118,20 +116,13 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     }
 
     private func setupDisplayLink() {
-        CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
-        guard let displayLink else { return }
+        let link = metalView.displayLink(target: self, selector: #selector(displayLinkFired))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
 
-        let context = Unmanaged.passUnretained(self).toOpaque()
-        CVDisplayLinkSetOutputCallback(displayLink, { _, _, _, _, _, userInfo in
-            guard let userInfo else { return kCVReturnSuccess }
-            let controller = Unmanaged<TerminalViewController>.fromOpaque(userInfo).takeUnretainedValue()
-            DispatchQueue.main.async {
-                controller.render()
-            }
-            return kCVReturnSuccess
-        }, context)
-
-        CVDisplayLinkStart(displayLink)
+    @objc private func displayLinkFired(_ link: CADisplayLink) {
+        render()
     }
 
     private func setupCursorTimer() {
@@ -156,12 +147,8 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     }
 
     private func render() {
-        guard !isRendering else { return }
         guard metalView.consumeNeedsRedraw() else { return }
         guard let drawable = metalView.metalLayer.nextDrawable() else { return }
-
-        isRendering = true
-        defer { isRendering = false }
 
         // Update cursor animation target.
         let (cx, cy) = session.terminal.getCursorLocation()
@@ -500,8 +487,6 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     deinit {
         urlRefreshWorkItem?.cancel()
         cursorBlinkTimer?.invalidate()
-        if let link = displayLink {
-            CVDisplayLinkStop(link)
-        }
+        displayLink?.invalidate()
     }
 }
