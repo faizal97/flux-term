@@ -57,6 +57,37 @@ final class URLDetectorTests: XCTestCase {
         XCTAssertTrue(URLDetector.detectURLs(in: terminal).isEmpty)
     }
 
+    func testDetectsURLAfterWideCharacters() {
+        let terminal = makeTerminal()
+        // CJK characters occupy 2 terminal columns each:
+        // '你' at cols 0-1, '好' at cols 2-3, ' ' at col 4, URL starts at col 5
+        terminal.feed(text: "你好 https://example.com")
+
+        let detected = URLDetector.detectURLs(in: terminal)
+        XCTAssertEqual(detected.count, 1)
+        XCTAssertEqual(detected[0].url.absoluteString, "https://example.com")
+        XCTAssertEqual(detected[0].startCol, 5, "URL column should account for wide CJK characters before it")
+        // "https://example.com" is 19 chars (all ASCII, width 1 each), so endCol = 5 + 19 - 1 = 23
+        XCTAssertEqual(detected[0].endCol, 23)
+    }
+
+    func testURLAtWorksWithWideCharacterOffset() {
+        let terminal = makeTerminal()
+        terminal.feed(text: "你好 https://example.com")
+
+        let detected = URLDetector.detectURLs(in: terminal)
+        XCTAssertEqual(detected.count, 1)
+
+        // Click on the URL area (col 5-23) should match
+        XCTAssertNotNil(URLDetector.urlAt(col: 5, row: 0, in: detected))
+        XCTAssertNotNil(URLDetector.urlAt(col: 15, row: 0, in: detected))
+        XCTAssertNotNil(URLDetector.urlAt(col: 23, row: 0, in: detected))
+        // Click before the URL (in the CJK text area) should not match
+        XCTAssertNil(URLDetector.urlAt(col: 4, row: 0, in: detected))
+        // Click after the URL should not match
+        XCTAssertNil(URLDetector.urlAt(col: 24, row: 0, in: detected))
+    }
+
     func testDetectRowsAreScrollInvariantWhenScrolledBack() {
         let terminal = makeTerminal(cols: 120, rows: 3)
         let lines = (0..<7).map { "line-\($0) https://example\($0).com" }
