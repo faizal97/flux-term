@@ -77,7 +77,12 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
 
         session.resize(cols: grid.cols, rows: grid.rows)
         session.delegate = self
-        session.start()
+        do {
+            try session.start()
+        } catch {
+            presentShellStartError(error)
+            return
+        }
         let (cursorX, cursorY) = session.terminal.getCursorLocation()
         let initialCursorPos = SIMD2<Float>(Float(cursorX), Float(cursorY))
         displayCursorPos = initialCursorPos
@@ -91,6 +96,22 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         setupDisplayLink()
         setupCursorTimer()
         metalView.setNeedsRedraw()
+    }
+
+    private func presentShellStartError(_ error: Error) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "FluxTerm couldn't start"
+            alert.informativeText = """
+            \(error.localizedDescription)
+
+            Check that your $SHELL environment variable points to a valid shell executable.
+            """
+            alert.addButton(withTitle: "Quit")
+            alert.runModal()
+            NSApp.terminate(nil)
+        }
     }
 
     override func viewDidAppear() {
