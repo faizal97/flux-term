@@ -10,6 +10,17 @@ protocol TerminalSessionDelegate: AnyObject {
 }
 
 final class TerminalSession: TerminalDelegate, LocalProcessDelegate {
+    enum ShellError: Error, LocalizedError {
+        case noValidShell(tried: [String])
+
+        var errorDescription: String? {
+            switch self {
+            case .noValidShell(let tried):
+                return "No valid shell found. Tried: \(tried.joined(separator: ", "))"
+            }
+        }
+    }
+
     private let initialCols: Int
     private let initialRows: Int
 
@@ -35,11 +46,16 @@ final class TerminalSession: TerminalDelegate, LocalProcessDelegate {
         initialRows = rows
     }
 
-    func start() {
+    func start() throws {
         guard !hasStarted else { return }
         hasStarted = true
 
-        let shell = detectShell()
+        guard let shell = Self.resolveShell() else {
+            throw ShellError.noValidShell(tried: [
+                ProcessInfo.processInfo.environment["SHELL"] ?? "(unset)",
+                "/bin/zsh", "/bin/bash", "/bin/sh"
+            ])
+        }
         let shellName = (shell as NSString).lastPathComponent
         process.startProcess(executable: shell, args: [], environment: nil, execName: "-\(shellName)")
     }
@@ -61,11 +77,26 @@ final class TerminalSession: TerminalDelegate, LocalProcessDelegate {
         sendInput(bytes[...])
     }
 
-    private func detectShell() -> String {
-        if let shell = ProcessInfo.processInfo.environment["SHELL"], !shell.isEmpty {
-            return shell
+    /// Resolves a valid shell executable path.
+    ///
+    /// Checks `$SHELL` from the environment first, then falls back through
+    /// `/bin/zsh`, `/bin/bash`, `/bin/sh`.
+    static func resolveShell(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
+    ) -> String? {
+        let envShell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 }
+        let fallbacks = ["/bin/zsh", "/bin/bash", "/bin/sh"]
+
+        var candidates: [String] = []
+        if let envShell {
+            candidates.append(envShell)
         }
-        return "/bin/zsh"
+        for fallback in fallbacks where fallback != envShell {
+            candidates.append(fallback)
+        }
+
+        return candidates.first(where: isExecutable)
     }
 
     func send(source: Terminal, data: ArraySlice<UInt8>) {
