@@ -158,7 +158,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     private func render() {
         guard !isRendering else { return }
         guard metalView.consumeNeedsRedraw() else { return }
-        guard let drawable = metalView.metalLayer.nextDrawable() else { return }
+        guard let drawable = metalView.metalLayer?.nextDrawable() else { return }
 
         isRendering = true
         defer { isRendering = false }

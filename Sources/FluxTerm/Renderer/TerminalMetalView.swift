@@ -8,8 +8,8 @@ final class TerminalMetalView: NSView {
     private(set) var device: MTLDevice!
     private(set) var commandQueue: MTLCommandQueue!
 
-    var metalLayer: CAMetalLayer {
-        layer as! CAMetalLayer
+    var metalLayer: CAMetalLayer? {
+        layer as? CAMetalLayer
     }
 
     private var needsRedraw = true
@@ -39,11 +39,13 @@ final class TerminalMetalView: NSView {
             fatalError("Metal unavailable on this system")
         }
         device = createdDevice
-        metalLayer.device = createdDevice
-        metalLayer.pixelFormat = .bgra8Unorm
-        metalLayer.framebufferOnly = true
-        metalLayer.presentsWithTransaction = false
-        metalLayer.isOpaque = true
+        if let metalLayer {
+            metalLayer.device = createdDevice
+            metalLayer.pixelFormat = .bgra8Unorm
+            metalLayer.framebufferOnly = true
+            metalLayer.presentsWithTransaction = false
+            metalLayer.isOpaque = true
+        }
 
         guard let queue = createdDevice.makeCommandQueue() else {
             fatalError("Failed to create Metal command queue")
@@ -55,6 +57,7 @@ final class TerminalMetalView: NSView {
 
     private func updateDrawableSize() {
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        guard let metalLayer else { return }
         metalLayer.contentsScale = scale
         metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         needsRedraw = true
