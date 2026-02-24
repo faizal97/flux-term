@@ -1,0 +1,27 @@
+name: Typecheck
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: typecheck-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Swift Build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-typecheck-macos-14-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            spm-typecheck-macos-14-
+
+      - name: Build
+        run: swift build
