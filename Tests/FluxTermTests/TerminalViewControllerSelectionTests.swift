@@ -64,4 +64,80 @@ final class TerminalViewControllerSelectionTests: XCTestCase {
 
         XCTAssertEqual(controller.getSelectedText(), expected)
     }
+
+    func testSelectAllIncludesScrollback() {
+        let controller = makeController(rows: 3)
+        let lines = (0..<8).map { "line-\($0)" }
+        controller.session.terminal.feed(text: lines.joined(separator: "\r\n"))
+
+        let yDisp = controller.session.terminal.getTopVisibleRow()
+        XCTAssertGreaterThan(yDisp, 0, "Need scrollback for this test")
+
+        controller.scrollBottomYDisp = yDisp
+        controller.selectAll(nil)
+
+        XCTAssertEqual(controller.selectionStart?.row, 0, "Select All should start at row 0 (top of scrollback)")
+        XCTAssertEqual(controller.selectionStart?.col, 0)
+        XCTAssertEqual(
+            controller.selectionEnd?.row,
+            yDisp + controller.session.terminal.rows - 1,
+            "Select All should end at the last buffer row"
+        )
+        XCTAssertEqual(controller.selectionEnd?.col, controller.session.terminal.cols - 1)
+    }
+
+    func testSelectAllCopiesEntireBufferIncludingScrollback() {
+        let controller = makeController(cols: 80, rows: 3)
+        let lines = (0..<8).map { "line-\($0)" }
+        controller.session.terminal.feed(text: lines.joined(separator: "\r\n"))
+
+        let yDisp = controller.session.terminal.getTopVisibleRow()
+        controller.scrollBottomYDisp = yDisp
+
+        controller.selectAll(nil)
+        guard let text = controller.getSelectedText() else {
+            XCTFail("Expected selected text after selectAll")
+            return
+        }
+        for i in 0..<8 {
+            XCTAssertTrue(text.contains("line-\(i)"), "Expected 'line-\(i)' in selected text")
+        }
+    }
+
+    func testSelectAllCoversFullBufferWhenScrolledUp() {
+        let controller = makeController(rows: 3)
+        let lines = (0..<8).map { "line-\($0)" }
+        controller.session.terminal.feed(text: lines.joined(separator: "\r\n"))
+
+        let bottomYDisp = controller.session.terminal.getTopVisibleRow()
+        controller.scrollBottomYDisp = bottomYDisp
+
+        controller.session.terminal.buffer.yDisp = 0
+
+        controller.selectAll(nil)
+
+        XCTAssertEqual(controller.selectionStart?.row, 0, "Start should be row 0 even when scrolled up")
+        XCTAssertEqual(
+            controller.selectionEnd?.row,
+            bottomYDisp + controller.session.terminal.rows - 1,
+            "End should be last buffer row regardless of scroll position"
+        )
+    }
+
+    func testSelectAllWhenNoScrollbackSelectsViewportRange() {
+        let controller = makeController(rows: 6)
+        let lines = (0..<3).map { "line-\($0)" }
+        controller.session.terminal.feed(text: lines.joined(separator: "\r\n"))
+
+        let yDisp = controller.session.terminal.getTopVisibleRow()
+        XCTAssertEqual(yDisp, 0, "Expected no scrollback when content fits viewport")
+        controller.scrollBottomYDisp = yDisp
+
+        controller.selectAll(nil)
+
+        XCTAssertEqual(controller.selectionStart?.row, 0)
+        XCTAssertEqual(controller.selectionStart?.col, 0)
+        XCTAssertEqual(controller.selectionEnd?.row, controller.session.terminal.rows - 1)
+        XCTAssertEqual(controller.selectionEnd?.col, controller.session.terminal.cols - 1)
+    }
 }

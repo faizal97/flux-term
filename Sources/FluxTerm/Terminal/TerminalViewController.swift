@@ -29,7 +29,8 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     private let cursorAnimationDuration: TimeInterval = 0.10
 
     private var lastGrid: (cols: Int, rows: Int)?
-    private var scrollBottomYDisp: Int = 0
+    // Visible for testing: selection tests assert full scrollback selection behavior.
+    var scrollBottomYDisp: Int = 0
 
     // Visible for testing: selection assertions in KeyInputPipelineTests.
     var selectionStart: CellPosition?
@@ -474,9 +475,9 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     }
 
     @objc override func selectAll(_ sender: Any?) {
-        let topVisibleRow = session.terminal.getTopVisibleRow()
-        selectionStart = CellPosition(col: 0, row: topVisibleRow)
-        selectionEnd = CellPosition(col: session.terminal.cols - 1, row: topVisibleRow + session.terminal.rows - 1)
+        selectionStart = CellPosition(col: 0, row: 0)
+        let lastRow = scrollBottomYDisp + session.terminal.rows - 1
+        selectionEnd = CellPosition(col: session.terminal.cols - 1, row: lastRow)
         metalView.setNeedsRedraw()
     }
 
