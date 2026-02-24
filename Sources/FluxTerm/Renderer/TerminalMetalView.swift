@@ -79,10 +79,12 @@ final class TerminalMetalView: NSView {
     }
 
     func setNeedsRedraw() {
+        dispatchPrecondition(condition: .onQueue(.main))
         needsRedraw = true
     }
 
     func consumeNeedsRedraw() -> Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
         if needsRedraw {
             needsRedraw = false
             return true
