@@ -30,6 +30,9 @@ final class MetalRenderer {
     }
 
     private static let ansiColorCubeTable: [Float] = [0, 95, 135, 175, 215, 255]
+    private static let defaultBufferCols = 360
+    private static let defaultBufferRows = 180
+    private static let bufferHeadroomFactor = 1.5
 
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
@@ -48,7 +51,9 @@ final class MetalRenderer {
     private var frameSemaphore: DispatchSemaphore
     private var frameIndex = 0
     private var instanceBuffers: [MTLBuffer] = []
+    private(set) var bufferCellCapacity: Int = 0
     private var pendingGlyphAtlasClear = false
+    private var didLogTruncationWarning = false
 
     private(set) var cellWidth: Float = 0
     private(set) var cellHeight: Float = 0
@@ -228,16 +233,89 @@ final class MetalRenderer {
     }
 
     private func allocateBuffers() throws {
-        let maxCells = 360 * 180
-        let size = MemoryLayout<CellInstance>.stride * maxCells
+        let initialCapacity = Self.bufferCapacityWithHeadroom(
+            for: Self.defaultBufferCols,
+            rows: Self.defaultBufferRows
+        )
+        let size = MemoryLayout<CellInstance>.stride * initialCapacity
+        var buffers: [MTLBuffer] = []
+        buffers.reserveCapacity(inflightCount)
         for _ in 0..<inflightCount {
             if let buf = device.makeBuffer(length: size, options: .storageModeShared) {
-                instanceBuffers.append(buf)
+                buffers.append(buf)
             }
         }
-        if instanceBuffers.isEmpty {
+        if buffers.count != inflightCount {
             throw InitializationError.instanceBufferAllocationFailed
         }
+        instanceBuffers = buffers
+        bufferCellCapacity = initialCapacity
+    }
+
+    @discardableResult
+    func ensureBufferCapacity(cols: Int, rows: Int) -> Bool {
+        guard cols > 0, rows > 0 else {
+            return true
+        }
+        let (requiredCells, overflowed) = cols.multipliedReportingOverflow(by: rows)
+        guard !overflowed else {
+            logWarning("Buffer capacity request overflowed for grid \(cols)x\(rows).")
+            return false
+        }
+        guard requiredCells > bufferCellCapacity else {
+            return true
+        }
+
+        let newCapacity = Self.bufferCapacityWithHeadroom(for: cols, rows: rows)
+        let maxAllowed = max(1, device.maxBufferLength / MemoryLayout<CellInstance>.stride)
+        let clampedCapacity = min(newCapacity, maxAllowed)
+        guard clampedCapacity > bufferCellCapacity else {
+            if requiredCells > clampedCapacity {
+                logWarning("Buffer capacity capped at \(clampedCapacity) cells by device.maxBufferLength; required \(requiredCells) cells for grid \(cols)x\(rows). Rendering may truncate.")
+                didLogTruncationWarning = false
+                return false
+            }
+            return true
+        }
+
+        let (size, overflowedSize) = MemoryLayout<CellInstance>.stride.multipliedReportingOverflow(by: clampedCapacity)
+        guard !overflowedSize else {
+            logWarning("Instance buffer allocation size overflow for capacity \(clampedCapacity).")
+            return false
+        }
+
+        // Both draw() and resize paths run on the main thread, so draining the
+        // frame semaphore here cannot race with concurrent CPU-side buffer swaps.
+        for _ in 0..<inflightCount {
+            frameSemaphore.wait()
+        }
+        defer {
+            for _ in 0..<inflightCount {
+                frameSemaphore.signal()
+            }
+        }
+
+        var newBuffers: [MTLBuffer] = []
+        newBuffers.reserveCapacity(inflightCount)
+        for _ in 0..<inflightCount {
+            if let buf = device.makeBuffer(length: size, options: .storageModeShared) {
+                newBuffers.append(buf)
+            }
+        }
+
+        guard newBuffers.count == inflightCount else {
+            logWarning("Failed to allocate all \(inflightCount) instance buffers for capacity \(clampedCapacity). Keeping previous buffers.")
+            return false
+        }
+
+        instanceBuffers = newBuffers
+        bufferCellCapacity = clampedCapacity
+        didLogTruncationWarning = false
+        if clampedCapacity < requiredCells {
+            logWarning("Buffer capacity grew to \(clampedCapacity) cells but required \(requiredCells) cells for grid \(cols)x\(rows). Rendering may truncate.")
+            return false
+        }
+        return true
     }
 
     func draw(
@@ -363,6 +441,10 @@ final class MetalRenderer {
             guard let line = terminal.getLine(row: row) else { continue }
             for col in 0..<terminal.cols {
                 if count >= maxCapacity {
+                    if !didLogTruncationWarning {
+                        logWarning("Instance buffer truncated at \(maxCapacity) cells for terminal grid \(terminal.cols)x\(terminal.rows).")
+                        didLogTruncationWarning = true
+                    }
                     return count
                 }
 
@@ -520,5 +602,19 @@ final class MetalRenderer {
         let cols = max(1, Int(widthPoints / max(1, cellWidth)))
         let rows = max(1, Int(heightPoints / max(1, cellHeight)))
         return (cols, rows)
+    }
+
+    static func bufferCapacityWithHeadroom(for cols: Int, rows: Int) -> Int {
+        let (requiredCells, overflowed) = cols.multipliedReportingOverflow(by: rows)
+        guard !overflowed else {
+            return Int.max
+        }
+        let scaled = Int(Double(requiredCells) * Self.bufferHeadroomFactor)
+        return max(requiredCells, scaled)
+    }
+
+    private func logWarning(_ message: String) {
+        let output = "[FluxTerm][MetalRenderer] Warning: \(message)\n"
+        FileHandle.standardError.write(Data(output.utf8))
     }
 }

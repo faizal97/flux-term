@@ -76,6 +76,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         let grid = renderer.gridSize(for: view.bounds.size)
         lastGrid = grid
 
+        renderer.ensureBufferCapacity(cols: grid.cols, rows: grid.rows)
         session.resize(cols: grid.cols, rows: grid.rows)
         session.delegate = self
         do {
@@ -131,6 +132,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
             return
         }
         lastGrid = grid
+        renderer.ensureBufferCapacity(cols: grid.cols, rows: grid.rows)
         session.resize(cols: grid.cols, rows: grid.rows)
         scrollBottomYDisp = session.terminal.getTopVisibleRow()
         refreshURLs()

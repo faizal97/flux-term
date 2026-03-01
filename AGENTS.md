@@ -16,3 +16,7 @@
   docs: update contributing guide
   refactor(terminal): simplify key encoding
   ```
+
+  > **CI enforced** — `.github/workflows/pr-standard.yml` validates PR titles on open/edit.
+  > The regex uses POSIX ERE (bash `[[ =~ ]]`), so use `[[:space:]]` / `[[:alnum:]_]`
+  > instead of `\s` / `\w` if editing the pattern.
