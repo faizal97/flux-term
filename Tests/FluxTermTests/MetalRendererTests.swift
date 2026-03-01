@@ -33,4 +33,27 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertTrue(error.localizedDescription.contains("glyph"))
         XCTAssertTrue(error.localizedDescription.contains("mock shader compile failure"))
     }
+
+    func testInitialBufferCapacityIsTracked() {
+        let capacity = MetalRenderer.bufferCapacityWithHeadroom(for: 80, rows: 24)
+        XCTAssertGreaterThanOrEqual(capacity, 80 * 24)
+    }
+
+    func testBufferCapacityGrowsWithHeadroom() {
+        let capacity = MetalRenderer.bufferCapacityWithHeadroom(for: 500, rows: 300)
+        let required = 500 * 300
+        XCTAssertGreaterThanOrEqual(capacity, required)
+        XCTAssertGreaterThan(capacity, required)
+    }
+
+    func testBufferCapacityHeadroomIsOnePointFive() {
+        let required = 200 * 100
+        let capacity = MetalRenderer.bufferCapacityWithHeadroom(for: 200, rows: 100)
+        XCTAssertEqual(capacity, Int(Double(required) * 1.5))
+    }
+
+    func testBufferCapacityOverflowReturnsIntMax() {
+        let capacity = MetalRenderer.bufferCapacityWithHeadroom(for: Int.max, rows: 2)
+        XCTAssertEqual(capacity, Int.max)
+    }
 }
