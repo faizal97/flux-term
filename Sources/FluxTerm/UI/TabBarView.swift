@@ -130,6 +130,12 @@ final class TabBarView: NSView {
             hoveredCloseButton = hovered
             needsDisplay = true
         }
+
+        if hovered != nil || newTabButtonRect().contains(point) {
+            NSCursor.pointingHand.set()
+        } else {
+            NSCursor.arrow.set()
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -137,6 +143,11 @@ final class TabBarView: NSView {
             hoveredCloseButton = nil
             needsDisplay = true
         }
+        NSCursor.arrow.set()
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .arrow)
     }
 
     private func drawTab(_ tab: Tab, at index: Int, in rect: NSRect, isActive: Bool) {
