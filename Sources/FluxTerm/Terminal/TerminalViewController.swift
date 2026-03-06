@@ -14,6 +14,9 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
     var config: TerminalConfig
     // Visible for testing: lets KeyInputPipelineTests intercept handleKeyDown bytes.
     var inputInterceptor: (([UInt8]) -> Void)?
+    var onSessionTerminated: (() -> Void)?
+    var onTitleChanged: ((String) -> Void)?
+    var startsSessionAutomatically = true
 
     private var displayLink: CADisplayLink?
     private var cursorBlinkPhase: Float = 0.0
@@ -79,12 +82,7 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
         renderer.ensureBufferCapacity(cols: grid.cols, rows: grid.rows)
         session.resize(cols: grid.cols, rows: grid.rows)
         session.delegate = self
-        do {
-            try session.start()
-        } catch {
-            presentShellStartError(error)
-            return
-        }
+
         let (cursorX, cursorY) = session.terminal.getCursorLocation()
         let initialCursorPos = SIMD2<Float>(Float(cursorX), Float(cursorY))
         displayCursorPos = initialCursorPos
@@ -94,6 +92,18 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
 
         scrollBottomYDisp = session.terminal.getTopVisibleRow()
         refreshURLs()
+
+        guard startsSessionAutomatically else {
+            metalView.setNeedsRedraw()
+            return
+        }
+
+        do {
+            try session.start()
+        } catch {
+            presentShellStartError(error)
+            return
+        }
 
         setupDisplayLink()
         setupCursorTimer()
@@ -433,13 +443,17 @@ final class TerminalViewController: NSViewController, TerminalSessionDelegate {
 
     func terminalSession(_ session: TerminalSession, titleDidChange title: String) {
         DispatchQueue.main.async { [weak self] in
-            self?.view.window?.title = title
+            self?.onTitleChanged?(title)
         }
     }
 
     func terminalSessionDidTerminate(_ session: TerminalSession, exitCode: Int32?) {
-        DispatchQueue.main.async {
-            NSApp.terminate(nil)
+        DispatchQueue.main.async { [weak self] in
+            if let onSessionTerminated = self?.onSessionTerminated {
+                onSessionTerminated()
+            } else {
+                NSApp.terminate(nil)
+            }
         }
     }
 

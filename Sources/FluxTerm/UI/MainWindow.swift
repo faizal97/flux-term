@@ -1,15 +1,18 @@
 import AppKit
 
 final class MainWindow: NSWindowController {
-    let terminalVC: TerminalViewController
+    let tabContainer: TabContainerViewController
 
     static func make() throws -> MainWindow {
-        let terminalVC = try TerminalViewController()
-        return MainWindow(terminalVC: terminalVC)
+        let tabContainer = TabContainerViewController()
+        let windowController = MainWindow(tabContainer: tabContainer)
+        let initialVC = try TerminalViewController()
+        tabContainer.addTab(TabItem(terminalVC: initialVC))
+        return windowController
     }
 
-    private init(terminalVC: TerminalViewController) {
-        self.terminalVC = terminalVC
+    private init(tabContainer: TabContainerViewController) {
+        self.tabContainer = tabContainer
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
@@ -55,9 +58,13 @@ final class MainWindow: NSWindowController {
 
         super.init(window: window)
 
-        terminalVC.view.frame = contentView.bounds
-        terminalVC.view.autoresizingMask = [.width, .height]
-        contentView.addSubview(terminalVC.view)
+        tabContainer.view.frame = contentView.bounds
+        tabContainer.view.autoresizingMask = [.width, .height]
+        contentView.addSubview(tabContainer.view)
+
+        tabContainer.onLastTabClosed = { [weak self] in
+            self?.window?.close()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -66,6 +73,47 @@ final class MainWindow: NSWindowController {
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
-        window?.makeFirstResponder(terminalVC.metalView)
+        window?.title = tabContainer.activeTab?.title ?? "FluxTerm"
+        if let metalView = tabContainer.activeTerminalVC?.metalView {
+            window?.makeFirstResponder(metalView)
+        }
+    }
+
+    func addNewTab() throws {
+        let terminalVC = try TerminalViewController()
+        let tab = TabItem(terminalVC: terminalVC)
+        tabContainer.addTab(tab)
+        tabContainer.selectTab(at: tabContainer.tabs.count - 1)
+    }
+
+    @objc func newTab(_ sender: Any?) {
+        do {
+            try addNewTab()
+        } catch {
+            presentTabError(error)
+        }
+    }
+
+    private func presentTabError(_ error: Error) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn't open new tab"
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
+    }
+
+    @objc func closeTab(_ sender: Any?) {
+        guard !tabContainer.tabs.isEmpty else { return }
+        tabContainer.removeTab(at: tabContainer.selectedIndex)
+    }
+
+    @objc func selectNextTab(_ sender: Any?) {
+        tabContainer.selectNextTab()
+    }
+
+    @objc func selectPreviousTab(_ sender: Any?) {
+        tabContainer.selectPreviousTab()
     }
 }
