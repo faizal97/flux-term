@@ -166,6 +166,7 @@ final class TabContainerViewController: NSViewController {
 
         tab.terminalVC.onTitleChanged = { [weak self, weak tab] title in
             guard let self, let tab else { return }
+            guard !tab.hasCustomTitle else { return }
             guard let index = self.tabs.firstIndex(where: { $0 === tab }) else { return }
             self.updateTabTitle(title, at: index)
         }
@@ -199,6 +200,12 @@ extension TabContainerViewController: TabBarViewDelegate {
 
     func tabBarDidRequestNewTab() {
         NotificationCenter.default.post(name: .newTabRequested, object: self)
+    }
+
+    func tabBarDidRequestRenameTab(at index: Int, newTitle: String) {
+        guard index >= 0 && index < tabs.count else { return }
+        tabs[index].hasCustomTitle = true
+        updateTabTitle(newTitle, at: index)
     }
 }
 

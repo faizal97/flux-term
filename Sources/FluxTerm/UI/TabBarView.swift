@@ -4,6 +4,7 @@ protocol TabBarViewDelegate: AnyObject {
     func tabBarDidSelectTab(at index: Int)
     func tabBarDidCloseTab(at index: Int)
     func tabBarDidRequestNewTab()
+    func tabBarDidRequestRenameTab(at index: Int, newTitle: String)
 }
 
 final class TabBarView: NSView {
@@ -43,6 +44,8 @@ final class TabBarView: NSView {
 
     private var hoveredCloseButton: Int?
     private var trackingAreaRef: NSTrackingArea?
+    private var renameField: NSTextField?
+    private var renamingTabIndex: Int?
 
     private static let truncatingStyle: NSParagraphStyle = {
         let style = NSMutableParagraphStyle()
@@ -106,6 +109,74 @@ final class TabBarView: NSView {
         super.mouseDown(with: event)
     }
 
+    override func rightMouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let index = tabs.indices.first(where: { rectForTab(at: $0).contains(point) }) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+
+        let menu = NSMenu()
+        let renameItem = NSMenuItem(title: "Rename Tab", action: #selector(handleRenameMenuItem(_:)), keyEquivalent: "")
+        renameItem.target = self
+        renameItem.tag = index
+        menu.addItem(renameItem)
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    @objc private func handleRenameMenuItem(_ sender: NSMenuItem) {
+        beginRenamingTab(at: sender.tag)
+    }
+
+    func beginRenamingTab(at index: Int) {
+        guard index >= 0 && index < tabs.count else { return }
+        endRenaming(commit: true)
+
+        renamingTabIndex = index
+        let tabRect = rectForTab(at: index)
+        let closeRect = closeButtonRect(forTabAt: index)
+        let titleRect = NSRect(
+            x: tabRect.minX + tabPadding,
+            y: 0,
+            width: max(0, closeRect.minX - tabRect.minX - tabPadding * 2),
+            height: tabRect.height
+        )
+
+        let field = NSTextField(frame: titleRect.insetBy(dx: -2, dy: 5))
+        field.stringValue = tabs[index].title
+        field.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        field.textColor = textColor
+        field.backgroundColor = baseColor
+        field.isBordered = false
+        field.isBezeled = false
+        field.focusRingType = .none
+        field.drawsBackground = true
+        field.delegate = self
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+
+        addSubview(field)
+        field.selectText(nil)
+        window?.makeFirstResponder(field)
+
+        renameField = field
+        needsDisplay = true
+    }
+
+    private func endRenaming(commit: Bool) {
+        guard let field = renameField, let index = renamingTabIndex else { return }
+        if commit {
+            let newTitle = field.stringValue.trimmingCharacters(in: .whitespaces)
+            if !newTitle.isEmpty {
+                delegate?.tabBarDidRequestRenameTab(at: index, newTitle: newTitle)
+            }
+        }
+        field.removeFromSuperview()
+        renameField = nil
+        renamingTabIndex = nil
+        needsDisplay = true
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
 
@@ -164,16 +235,18 @@ final class TabBarView: NSView {
             height: rect.height
         )
 
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: isActive ? .medium : .regular),
-            .foregroundColor: isActive ? textColor : subtext0Color,
-            .paragraphStyle: Self.truncatingStyle
-        ]
+        if renamingTabIndex != index {
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 11, weight: isActive ? .medium : .regular),
+                .foregroundColor: isActive ? textColor : subtext0Color,
+                .paragraphStyle: Self.truncatingStyle
+            ]
 
-        NSString(string: tab.title).draw(
-            in: titleRect.insetBy(dx: 0, dy: 7),
-            withAttributes: attributes
-        )
+            NSString(string: tab.title).draw(
+                in: titleRect.insetBy(dx: 0, dy: 7),
+                withAttributes: attributes
+            )
+        }
 
         let closePath = NSBezierPath()
         let inset: CGFloat = 3
@@ -240,5 +313,19 @@ final class TabBarView: NSView {
     private func newTabButtonRect() -> NSRect {
         let x = trafficLightInset + calculateTabWidth() * CGFloat(tabs.count) + 4
         return NSRect(x: x, y: 0, width: newTabButtonWidth, height: bounds.height - 1)
+    }
+}
+
+extension TabBarView: NSTextFieldDelegate {
+    func controlTextDidEndEditing(_ obj: Notification) {
+        endRenaming(commit: true)
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(cancelOperation(_:)) {
+            endRenaming(commit: false)
+            return true
+        }
+        return false
     }
 }
